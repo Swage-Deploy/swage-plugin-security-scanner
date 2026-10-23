@@ -4,6 +4,7 @@ namespace Swage\SecurityScanner\Livewire;
 
 use App\Enums\ResourceStatus;
 use App\Models\Server;
+use Carbon\CarbonInterface;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
@@ -203,9 +204,9 @@ class SecurityPanel extends Component
     }
 
     /**
-     * The addresses with the most hostile events in the last day, and what they were.
+     * The addresses with the most hostile events in the last day, what they were, and when the address was last seen.
      *
-     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, banned: bool, blocked: bool}>
+     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface, banned: bool, blocked: bool}>
      */
     #[Computed]
     public function addresses(): SupportCollection
@@ -216,17 +217,23 @@ class SecurityPanel extends Component
             ->whereIn('kind', EventKind::hostile())
             ->where('last_seen_at', '>=', now()->subDay());
 
-        $top = $query()->selectRaw('ip, sum(count) as total')->groupBy('ip')->orderByDesc('total')->limit(10)->pluck('total', 'ip');
+        $top = $query()
+            ->selectRaw('ip, sum(count) as total, max(last_seen_at) as last_seen_at')
+            ->groupBy('ip')
+            ->orderByDesc('total')
+            ->limit(10)
+            ->get();
 
-        $kinds = $query()->whereIn('ip', $top->keys())->selectRaw('ip, kind, sum(count) as total')->groupBy('ip', 'kind')->get()->groupBy('ip');
+        $kinds = $query()->whereIn('ip', $top->pluck('ip'))->selectRaw('ip, kind, sum(count) as total')->groupBy('ip', 'kind')->get()->groupBy('ip');
         $blocked = $this->blockedAddresses->pluck('ip');
 
-        return $top->map(fn (mixed $total, string $ip): array => [
-            'ip' => $ip,
-            'total' => (int) $total,
-            'kinds' => $kinds->get($ip, collect())->mapWithKeys(fn (SecurityEvent $row): array => [$row->kind->label() => (int) $row->total])->sortDesc()->all(),
-            'banned' => $this->state->isBannedByFail2ban($ip),
-            'blocked' => $blocked->contains($ip),
+        return $top->map(fn (SecurityEvent $row): array => [
+            'ip' => $row->ip,
+            'total' => (int) $row->total,
+            'kinds' => $kinds->get($row->ip, collect())->mapWithKeys(fn (SecurityEvent $kind): array => [$kind->kind->label() => (int) $kind->total])->sortDesc()->all(),
+            'last_seen_at' => $row->last_seen_at,
+            'banned' => $this->state->isBannedByFail2ban($row->ip),
+            'blocked' => $blocked->contains($row->ip),
         ])->values();
     }
 

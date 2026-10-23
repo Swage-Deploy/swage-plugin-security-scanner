@@ -484,3 +484,22 @@ test('old events and long resolved alerts are pruned', function () {
 
     expect(SecurityEvent::pluck('id')->all())->toBe([$kept->id]);
 });
+
+test('the busiest hostile addresses show when each was last seen, and blocked ones stay listed until they go quiet for a day', function () {
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['last_scanned_at' => now()]);
+    $event = fn (string $ip, string $kind, int $count, string $seen) => SecurityEvent::create(['server_id' => $server->id, 'kind' => $kind, 'ip' => $ip, 'source' => 'ssh', 'bucket' => now()->startOfHour(), 'count' => $count, 'first_seen_at' => $seen, 'last_seen_at' => $seen]);
+    $event('203.0.113.9', EventKind::SshFailedLogin->value, 30, '2026-10-23 09:00:00');
+    $event('203.0.113.9', EventKind::SshInvalidUser->value, 5, '2026-10-23 11:30:00');
+    $event('203.0.113.10', EventKind::HttpProbe->value, 3, '2026-10-22 11:00:00');
+    BlockedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.9', 'status' => ResourceStatus::Installed]);
+
+    $addresses = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('Last seen')
+        ->assertSee('30 minutes ago')
+        ->get('addresses');
+
+    expect($addresses)->toHaveCount(1)
+        ->and($addresses[0])->toMatchArray(['ip' => '203.0.113.9', 'total' => 35, 'blocked' => true])
+        ->and($addresses[0]['last_seen_at']->toDateTimeString())->toBe('2026-10-23 11:30:00');
+});
