@@ -1,0 +1,74 @@
+<?php
+
+namespace Swage\SecurityScanner\Models;
+
+use App\Models\Server;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * Whether a server's logs are scanned, and where the last scan stopped reading each of them.
+ *
+ * @property array{journal?: string|null, files?: array<string, array{inode: int, offset: int}>}|null $cursors
+ */
+#[Table('security_scanner_states')]
+#[Fillable(['server_id', 'enabled', 'cursors', 'panel_address', 'fail2ban_installed', 'fail2ban_banned', 'last_scanned_at', 'last_error'])]
+class ScannerState extends Model
+{
+    /**
+     * The model's default values for attributes.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'enabled' => false,
+    ];
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'enabled' => 'boolean',
+            'cursors' => 'array',
+            'fail2ban_installed' => 'boolean',
+            'fail2ban_banned' => 'array',
+            'last_scanned_at' => 'datetime',
+        ];
+    }
+
+    public static function for(Server $server): self
+    {
+        return static::firstOrCreate(['server_id' => $server->id]);
+    }
+
+    /**
+     * @return BelongsTo<Server, $this>
+     */
+    public function server(): BelongsTo
+    {
+        return $this->belongsTo(Server::class);
+    }
+
+    /**
+     * Determine if the server has been scanned before, so its logs have a starting point. The first scan only reads
+     * recent history, and logins it finds become the addresses the server is known to be reached from.
+     */
+    public function hasBaseline(): bool
+    {
+        return $this->last_scanned_at !== null;
+    }
+
+    /**
+     * Determine if fail2ban has banned the address from SSH.
+     */
+    public function isBannedByFail2ban(string $ip): bool
+    {
+        return in_array($ip, $this->fail2ban_banned ?? [], true);
+    }
+}
