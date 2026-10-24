@@ -5,11 +5,13 @@ use App\Enums\ServerStatus;
 use App\Models\Server;
 use App\Models\User;
 use App\Servers\ServerIntegrations;
+use App\Sites\CloudflareNetworks;
 use App\Ssh\RemoteShell;
 use App\Ssh\ScriptResult;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
+use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Enums\AlertRule;
 use Swage\SecurityScanner\Enums\AlertSeverity;
 use Swage\SecurityScanner\Enums\EventKind;
@@ -587,4 +589,11 @@ test('the scan script reads nginx\'s deny list', function () {
     expect($script->render([]))->toContain("sed -n 's/^deny \\(.*\\);$/\\1/p' /etc/nginx/conf.d/swage-security-scanner-blocked.conf")
         ->and($script->parse("\n@@M nginx-deny\npresent\n203.0.113.9\nnonsense\n\n@@M end\n")->nginxDenied)->toBe(['203.0.113.9'])
         ->and($script->parse("\n@@M nginx-deny\n\n@@M end\n")->nginxDenied)->toBeNull();
+});
+
+test('the plugin keeps its own list of cloudflare\'s ranges for swage releases without one, matching swage\'s', function () {
+    expect(CloudflareAddresses::RANGES)->toBe(CloudflareNetworks::RANGES)
+        ->and(CloudflareAddresses::ranges())->toBe(CloudflareNetworks::RANGES)
+        ->and(CloudflareAddresses::contains('104.16.1.1'))->toBeTrue()
+        ->and(CloudflareAddresses::contains('203.0.113.9'))->toBeFalse();
 });

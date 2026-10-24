@@ -34,6 +34,7 @@ Log lines contain text that attackers choose, such as request paths and username
 
 ### Limits
 
+- Sites proxied by Cloudflare only log their visitors' addresses on Swage v1.0.9 and later, which takes them from Cloudflare's header. Before that, their requests are logged as Cloudflare's addresses, which the scanner leaves out, so attacks through Cloudflare aren't seen, and nginx's deny list can't match their visitors. Update Swage, then reprovision or re-save each site so its nginx config takes visitors' addresses from Cloudflare.
 - Lines written to an access log between the last scan and its rotation aren't read, which is at most a few minutes of one log per day.
 - On servers that accept SSH passwords, one failed password can be logged as both a failed password and a closed connection, and is counted twice. The thresholds are set with this in mind.
 
