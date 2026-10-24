@@ -81,7 +81,7 @@
                             <flux:table.cell align="end">
                                 @if ($canManage)
                                     @if ($alert->rule->concernsAddress() && ! $this->blockedAddresses->contains('ip', $alert->subject))
-                                        <flux:button size="sm" variant="ghost" icon="no-symbol" wire:click="blockFromAlert({{ $alert->id }})" wire:confirm.danger="{{ __('Block every connection from :ip, including SSH and HTTP?', ['ip' => $alert->subject]) }}" :tooltip="__('Block in the firewall')" />
+                                        <flux:button size="sm" variant="ghost" icon="no-symbol" wire:click="blockFromAlert({{ $alert->id }})" wire:confirm.danger="{{ __('Block :ip from SSH and every site on this server?', ['ip' => $alert->subject]) }}" :tooltip="__('Block in the firewall')" />
                                     @endif
                                     <flux:button size="sm" variant="ghost" icon="check" wire:click="resolve({{ $alert->id }})" :tooltip="__('Resolve')" />
                                 @endif
@@ -101,7 +101,7 @@
         </x-panel>
     @endif
 
-    <x-panel icon="no-symbol" :heading="__('Blocked addresses')" :description="__('Denied everything by the server\'s firewall. Sites proxied by Cloudflare reach the server from Cloudflare\'s addresses, so blocking a visitor there has to be done in Cloudflare.')" flush>
+    <x-panel icon="no-symbol" :heading="__('Blocked addresses')" :description="__('Denied by the server\'s firewall, which covers SSH and sites reached directly, and by nginx, which covers sites proxied by Cloudflare, since nginx takes the visitor\'s address from Cloudflare. Cloudflare\'s own addresses are never counted or blocked.')" flush>
         @if ($canManage)
             <x-slot:actions>
                 <flux:modal.trigger name="security-scanner-block">

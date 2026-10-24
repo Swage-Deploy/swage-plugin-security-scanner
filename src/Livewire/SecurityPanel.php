@@ -14,6 +14,7 @@ use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
+use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Enums\EventKind;
 use Swage\SecurityScanner\Jobs\BlockAddress;
 use Swage\SecurityScanner\Jobs\InstallFail2ban;
@@ -111,6 +112,12 @@ class SecurityPanel extends Component
             'reason' => ['nullable', 'string', 'max:255'],
         ]);
 
+        $validated['ip'] = (string) inet_ntop((string) inet_pton($validated['ip']));
+
+        if (CloudflareAddresses::contains($validated['ip'])) {
+            throw ValidationException::withMessages(['ip' => __(':ip belongs to Cloudflare, whose proxy connects to sites on its visitors\' behalf. Blocking it would cut off every visitor Cloudflare routes through it.', ['ip' => $validated['ip']])]);
+        }
+
         if ($validated['ip'] === $this->state->panel_address) {
             throw ValidationException::withMessages(['ip' => __('Swage connects to this server from :ip, so blocking it would lock Swage out.', ['ip' => $validated['ip']])]);
         }
@@ -135,7 +142,7 @@ class SecurityPanel extends Component
 
         $this->reset('ip', 'reason');
         Flux::modal('security-scanner-block')->close();
-        Flux::toast(variant: 'success', text: __('Blocking :ip in the firewall.', ['ip' => $address->ip]));
+        Flux::toast(variant: 'success', text: __('Blocking :ip in the firewall and nginx.', ['ip' => $address->ip]));
     }
 
     /**

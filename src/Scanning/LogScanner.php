@@ -2,12 +2,17 @@
 
 namespace Swage\SecurityScanner\Scanning;
 
+use App\Enums\ResourceStatus;
 use App\Ssh\RemoteShell;
 use RuntimeException;
+use Swage\SecurityScanner\CloudflareAddresses;
+use Swage\SecurityScanner\Jobs\BlockAddress;
+use Swage\SecurityScanner\Models\BlockedAddress;
 use Swage\SecurityScanner\Models\ScannerState;
 
 /**
- * Reads what a server's logs gained since the last scan, counts it and raises alerts from it.
+ * Reads what a server's logs gained since the last scan, counts it and raises alerts from it. Events from Cloudflare's
+ * own addresses are left out, so they are never ranked or blocked.
  */
 class LogScanner
 {
@@ -42,6 +47,8 @@ class LogScanner
             array_push($events, ...$this->nginxParser->parse($file->lines(), $file->source()));
         }
 
+        $events = array_values(array_filter($events, fn (LogEvent $event): bool => $event->ip === null || ! CloudflareAddresses::contains($event->ip)));
+
         $this->recorder->record($state->server, $events);
         $this->detector->detect($state, $events);
 
@@ -54,7 +61,27 @@ class LogScanner
             'last_error' => null,
         ]);
 
+        $this->restoreNginxBlocks($state, $output);
+
         return $events;
+    }
+
+    /**
+     * Block again the addresses missing from nginx's deny list, such as ones blocked before the list existed, or on a
+     * server whose nginx config was rebuilt.
+     */
+    protected function restoreNginxBlocks(ScannerState $state, ScanOutput $output): void
+    {
+        if ($output->nginxDenied === null) {
+            return;
+        }
+
+        BlockedAddress::query()
+            ->where('server_id', $state->server_id)
+            ->where('status', ResourceStatus::Installed)
+            ->whereNotIn('ip', $output->nginxDenied)
+            ->get()
+            ->each(fn (BlockedAddress $address) => BlockAddress::dispatch($address));
     }
 
     /**

@@ -15,6 +15,8 @@ The scanner is turned on per server, from the server's **Plugins** tab.
 | SSH login from a new address | Low | Someone logs in over SSH from an address the server hasn't been logged into from before. Logins found by the first scan become the known addresses. |
 | Probing for vulnerable files | Low | One address requests 20 or more paths such as `/.env`, `/.git`, `/wp-login.php`, `/vendor/phpunit` or a PHP script other than `index.php` within the last hour. |
 
+Events from Cloudflare's own addresses aren't counted. nginx logs them for requests it can't take a visitor's address from, such as ones for a hostname no site serves, and blocking one would cut off every visitor Cloudflare routes through it.
+
 Each rule keeps at most one open alert per address or user. Further activity counts on that alert, and a new alert only opens after the earlier one is resolved. Swage's own SSH logins aren't counted: the scanner learns the address Swage connects from on each scan.
 
 The panel also shows totals for the last 24 hours, the ten busiest hostile addresses, the addresses blocked in the firewall, and whether fail2ban is installed. Addresses fail2ban has banned, in its `sshd` or `recidive` jail, are listed under fail2ban with what they did in the last 24 hours, rather than among the busiest addresses.
@@ -34,17 +36,22 @@ Log lines contain text that attackers choose, such as request paths and username
 
 - Lines written to an access log between the last scan and its rotation aren't read, which is at most a few minutes of one log per day.
 - On servers that accept SSH passwords, one failed password can be logged as both a failed password and a closed connection, and is counted twice. The thresholds are set with this in mind.
-- Blocking happens in the server's firewall. A site proxied by Cloudflare is reached from Cloudflare's addresses, so blocking a visitor's address only stops them reaching SSH and the server directly. Block them in Cloudflare to stop them reaching the site.
 
 ## Blocking addresses
 
-**Block** on an alert or on one of the busiest addresses, or **Block address** on the blocked addresses panel, adds this rule ahead of the firewall's others:
+**Block** on an alert or on one of the busiest addresses, or **Block address** on the blocked addresses panel, blocks the address in two places:
 
-```bash
-ufw prepend deny from <address> comment 'Blocked by Swage security scanner'
-```
+- **The firewall**, with a rule ahead of the firewall's others, which stops it reaching SSH and any site it reaches directly:
 
-Blocking and unblocking show in the server's activity log. The scanner refuses to block the address Swage connects to the server from, or the address you're using Swage from.
+  ```bash
+  ufw prepend deny from <address> comment 'Blocked by Swage security scanner'
+  ```
+
+- **nginx**, with a `deny <address>;` line in `/etc/nginx/conf.d/swage-security-scanner-blocked.conf`, which every site inherits, followed by a reload. Visitors to a site proxied by Cloudflare connect from Cloudflare's addresses, so the firewall never sees them. nginx takes the visitor's address from Cloudflare's header before it applies its deny list, so they get a 403. Servers without nginx, such as database servers, only get the firewall rule.
+
+Blocking and unblocking show in the server's activity log. Each scan checks the nginx deny list and blocks again any blocked address missing from it, such as addresses blocked before version 1.3.0.
+
+The scanner refuses to block an address in Cloudflare's ranges, the address Swage connects to the server from, or the address you're using Swage from.
 
 ## Setup
 

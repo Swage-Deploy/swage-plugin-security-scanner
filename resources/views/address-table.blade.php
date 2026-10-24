@@ -22,7 +22,7 @@
                 <flux:table.cell :title="$address['last_seen_at']?->toDayDateTimeString()">{{ $address['last_seen_at']?->diffForHumans() ?? __('Not in the last 24 hours') }}</flux:table.cell>
                 <flux:table.cell align="end">
                     @if ($canManage && ! $address['blocked'])
-                        <flux:button size="sm" variant="ghost" icon="no-symbol" wire:click="block('{{ $address['ip'] }}')" wire:confirm.danger="{{ __('Block every connection from :ip, including SSH and HTTP?', ['ip' => $address['ip']]) }}" :tooltip="__('Block in the firewall')" />
+                        <flux:button size="sm" variant="ghost" icon="no-symbol" wire:click="block('{{ $address['ip'] }}')" wire:confirm.danger="{{ __('Block :ip from SSH and every site on this server?', ['ip' => $address['ip']]) }}" :tooltip="__('Block in the firewall')" />
                     @endif
                 </flux:table.cell>
             </flux:table.row>

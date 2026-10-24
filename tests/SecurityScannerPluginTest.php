@@ -58,6 +58,7 @@ class ScannedServer implements RemoteShell
         public ?string $cursor = 's=abc;i=10',
         public ?string $banned = null,
         public int $exitCode = 0,
+        public ?array $denied = null,
     ) {}
 
     public function run(Server $server, string $script, ?string $as = null, int $timeout = 600, ?Closure $onOutput = null): ScriptResult
@@ -72,6 +73,7 @@ class ScannedServer implements RemoteShell
         $output = "\n{$marker} client {$this->client}\n";
         $output .= "\n{$marker} journal\n".implode("\n", $this->journal).($this->cursor ? "\n-- cursor: {$this->cursor}" : '')."\n";
         $output .= "\n{$marker} fail2ban\n".($this->banned === null ? '' : "installed\n{$this->banned}\n");
+        $output .= "\n{$marker} nginx-deny\n".($this->denied === null ? '' : implode("\n", ['present', ...$this->denied])."\n");
 
         foreach ($this->files as $path => $file) {
             $output .= "\n{$marker} nginx {$file['inode']} {$file['start']} ".($file['new'] ? 'new' : 'known')." {$path}\n{$file['content']}";
@@ -421,12 +423,15 @@ test('blocking and unblocking run ufw on the server and are recorded in its acti
     app()->call([new BlockAddress($address), 'handle']);
 
     $shell->assertRan("ufw prepend deny from '203.0.113.9' comment 'Blocked by Swage security scanner'");
+    $shell->assertRan("grep -qxF -- 'deny 203.0.113.9;' /etc/nginx/conf.d/swage-security-scanner-blocked.conf || echo 'deny 203.0.113.9;' >> /etc/nginx/conf.d/swage-security-scanner-blocked.conf");
+    $shell->assertRan('systemctl reload nginx');
     expect($address->fresh()->status)->toBe(ResourceStatus::Installed)
-        ->and($address->server->tasks()->first()->name)->toBe('Blocking 203.0.113.9 in the firewall');
+        ->and($address->server->tasks()->first()->name)->toBe('Blocking 203.0.113.9 in the firewall and nginx');
 
     app()->call([new UnblockAddress($address), 'handle']);
 
     $shell->assertRan("ufw delete deny from '203.0.113.9'");
+    $shell->assertRan("grep -vxF -- 'deny 203.0.113.9;' /etc/nginx/conf.d/swage-security-scanner-blocked.conf");
     expect(BlockedAddress::count())->toBe(0);
 });
 
@@ -531,4 +536,55 @@ test('addresses fail2ban has banned are listed under fail2ban instead of among t
             ['203.0.113.9', 40],
             ['203.0.113.50', 0],
         ]);
+});
+
+test('cloudflare\'s own addresses are never counted, so they are never ranked or alerted on', function () {
+    $server = Server::factory()->create();
+    $probes = implode("\n", array_fill(0, 25, accessLine('104.16.1.1', 'GET /.env HTTP/1.1', 444)))."\n".accessLine('2606:4700::1111', 'GET /.git/config HTTP/1.1')."\n";
+
+    scannedServer(files: ['/var/log/nginx/access.log' => ['inode' => 1, 'start' => 0, 'new' => true, 'content' => $probes]]);
+    scan($server);
+
+    expect(SecurityEvent::count())->toBe(0)
+        ->and(SecurityAlert::count())->toBe(0);
+});
+
+test('addresses in cloudflare\'s ranges cannot be blocked, and addresses are stored in their shortest form', function () {
+    Queue::fake();
+    $server = Server::factory()->create();
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->call('block', '104.16.1.1')
+        ->assertHasErrors(['ip'])
+        ->assertSee('belongs to Cloudflare')
+        ->call('block', '2606:4700::1111')
+        ->assertHasErrors(['ip'])
+        ->call('block', '2001:DB8:0:0::7')
+        ->assertHasNoErrors();
+
+    expect(BlockedAddress::pluck('ip')->all())->toBe(['2001:db8::7']);
+});
+
+test('scans block again any blocked address missing from nginx\'s deny list', function (?array $denied, int $restored) {
+    Queue::fake();
+    $server = Server::factory()->create();
+    BlockedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.9', 'status' => ResourceStatus::Installed]);
+    BlockedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.10', 'status' => ResourceStatus::Failed]);
+
+    scannedServer(denied: $denied);
+    scan($server);
+
+    Queue::assertPushed(BlockAddress::class, $restored);
+})->with([
+    'missing from the list' => [[], 1],
+    'already in the list' => [['203.0.113.9'], 0],
+    'no nginx on the server' => [null, 0],
+]);
+
+test('the scan script reads nginx\'s deny list', function () {
+    $script = new ScanScript('@@M');
+
+    expect($script->render([]))->toContain("sed -n 's/^deny \\(.*\\);$/\\1/p' /etc/nginx/conf.d/swage-security-scanner-blocked.conf")
+        ->and($script->parse("\n@@M nginx-deny\npresent\n203.0.113.9\nnonsense\n\n@@M end\n")->nginxDenied)->toBe(['203.0.113.9'])
+        ->and($script->parse("\n@@M nginx-deny\n\n@@M end\n")->nginxDenied)->toBeNull();
 });

@@ -35,6 +35,13 @@ final class ScanOutput
     public array $fail2banBanned = [];
 
     /**
+     * The addresses in nginx's deny list, or null when the server does not run nginx.
+     *
+     * @var list<string>|null
+     */
+    public ?array $nginxDenied = null;
+
+    /**
      * @var list<ScannedFile>
      */
     public array $files = [];

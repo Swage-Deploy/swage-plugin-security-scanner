@@ -3,6 +3,7 @@
 namespace Swage\SecurityScanner\Scanning;
 
 use Illuminate\Support\Str;
+use Swage\SecurityScanner\Models\BlockedAddress;
 
 /**
  * The script that reads what a server's logs gained since the last scan, and the reading of its output.
@@ -56,6 +57,7 @@ final readonly class ScanScript
             ->map(fn (array $cursor, string $path): string => '['.escapeshellarg($path).']='.escapeshellarg((int) $cursor['inode'].':'.(int) $cursor['offset']))
             ->implode(' ');
 
+        $denyList = BlockedAddress::NGINX_DENY_PATH;
         $backfill = self::BACKFILL_BYTES;
         $maxBytes = self::MAX_BYTES_PER_FILE;
         $maxLines = self::MAX_JOURNAL_LINES;
@@ -81,6 +83,12 @@ final readonly class ScanScript
             for jail in sshd recidive; do
                 fail2ban-client status "\$jail" 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p'
             done
+        fi
+
+        section nginx-deny
+        if command -v nginx > /dev/null 2>&1; then
+            echo present
+            sed -n 's/^deny \(.*\);\$/\\1/p' {$denyList} 2>/dev/null
         fi
 
         declare -A known=({$known})
@@ -121,6 +129,7 @@ final readonly class ScanScript
                 'journal' => $this->readJournal($result, $content),
                 'journal-failed' => $result->journalFailed = true,
                 'fail2ban' => $this->readFail2ban($result, $content),
+                'nginx-deny' => $this->readNginxDeny($result, $content),
                 'nginx' => count($fields) === 5 ? $result->files[] = new ScannedFile(
                     path: $fields[4],
                     inode: (int) $fields[1],
@@ -144,6 +153,18 @@ final readonly class ScanScript
                 $result->journalLines[] = $line;
             }
         }
+    }
+
+    /**
+     * Read the addresses nginx denies. Servers without nginx, such as database servers, have no list.
+     */
+    protected function readNginxDeny(ScanOutput $result, string $content): void
+    {
+        $lines = explode("\n", trim($content));
+
+        $result->nginxDenied = $lines[0] === 'present'
+            ? array_values(array_filter(array_slice($lines, 1), fn (string $ip): bool => filter_var(trim($ip), FILTER_VALIDATE_IP) !== false))
+            : null;
     }
 
     protected function readFail2ban(ScanOutput $result, string $content): void

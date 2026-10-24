@@ -25,11 +25,24 @@ class UnblockAddress implements ShouldQueue
     public function handle(RunServerTask $runTask): void
     {
         $ip = escapeshellarg($this->address->ip);
+        $deny = escapeshellarg("deny {$this->address->ip};");
+        $list = BlockedAddress::NGINX_DENY_PATH;
+        $lock = BlockedAddress::LOCK_PATH;
 
-        $runTask->run($this->address->server, "Unblocking {$this->address->ip} in the firewall", <<<BASH
+        $runTask->run($this->address->server, "Unblocking {$this->address->ip} in the firewall and nginx", <<<BASH
         set -Eeuo pipefail
+
         ufw delete deny from {$ip} || echo "No firewall rule was blocking {$this->address->ip}."
-        BASH, timeout: 30);
+
+        if [ -f {$list} ]; then
+            exec 9> {$lock}
+            flock 9
+            grep -vxF -- {$deny} {$list} > {$list}.tmp || true
+            mv {$list}.tmp {$list}
+            nginx -t -q
+            systemctl reload nginx
+        fi
+        BASH, timeout: 60);
 
         $this->address->delete();
     }
