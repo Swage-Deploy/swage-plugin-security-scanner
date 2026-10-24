@@ -78,7 +78,9 @@ final readonly class ScanScript
         section fail2ban
         if command -v fail2ban-client > /dev/null 2>&1; then
             echo installed
-            fail2ban-client status sshd 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p'
+            for jail in sshd recidive; do
+                fail2ban-client status "\$jail" 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p'
+            done
         fi
 
         declare -A known=({$known})
@@ -155,9 +157,9 @@ final readonly class ScanScript
         }
 
         $result->fail2banInstalled = true;
-        $result->fail2banBanned = array_values(array_filter(
+        $result->fail2banBanned = array_values(array_unique(array_filter(
             preg_split('/[\s,]+/', $lines[1] ?? '', flags: PREG_SPLIT_NO_EMPTY) ?: [],
             fn (string $ip): bool => filter_var($ip, FILTER_VALIDATE_IP) !== false,
-        ));
+        )));
     }
 }

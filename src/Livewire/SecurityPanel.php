@@ -5,8 +5,10 @@ namespace Swage\SecurityScanner\Livewire;
 use App\Enums\ResourceStatus;
 use App\Models\Server;
 use Carbon\CarbonInterface;
+use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Validation\ValidationException;
@@ -204,12 +206,50 @@ class SecurityPanel extends Component
     }
 
     /**
-     * The addresses with the most hostile events in the last day, what they were, and when the address was last seen.
+     * The addresses with the most hostile events in the last day, leaving out those fail2ban has banned, which are
+     * listed in the fail2ban panel instead.
      *
-     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface, banned: bool, blocked: bool}>
+     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
      */
     #[Computed]
     public function addresses(): SupportCollection
+    {
+        return $this->hostileAddresses(fn (Builder $query) => $query->whereNotIn('ip', $this->state->fail2ban_banned ?? [])->limit(10));
+    }
+
+    /**
+     * The addresses fail2ban has banned, with what they did in the last day. An address banned for longer, such as by
+     * the week long recidive jail, may have nothing recorded in the last day.
+     *
+     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
+     */
+    #[Computed]
+    public function bannedAddresses(): SupportCollection
+    {
+        $banned = $this->state->fail2ban_banned ?? [];
+
+        if ($banned === []) {
+            return collect();
+        }
+
+        $active = $this->hostileAddresses(fn (Builder $query) => $query->whereIn('ip', $banned));
+        $blocked = $this->blockedAddresses->pluck('ip');
+
+        return $active->concat(
+            collect($banned)
+                ->diff($active->pluck('ip'))
+                ->map(fn (string $ip): array => ['ip' => $ip, 'total' => 0, 'kinds' => [], 'last_seen_at' => null, 'blocked' => $blocked->contains($ip)])
+        )->values();
+    }
+
+    /**
+     * Rank addresses by their hostile events in the last day, and say what the events were and when the address was
+     * last seen.
+     *
+     * @param  Closure(Builder<SecurityEvent>): mixed  $scope
+     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
+     */
+    protected function hostileAddresses(Closure $scope): SupportCollection
     {
         $query = fn () => SecurityEvent::query()
             ->where('server_id', $this->server->id)
@@ -221,7 +261,7 @@ class SecurityPanel extends Component
             ->selectRaw('ip, sum(count) as total, max(last_seen_at) as last_seen_at')
             ->groupBy('ip')
             ->orderByDesc('total')
-            ->limit(10)
+            ->tap($scope)
             ->get();
 
         $kinds = $query()->whereIn('ip', $top->pluck('ip'))->selectRaw('ip, kind, sum(count) as total')->groupBy('ip', 'kind')->get()->groupBy('ip');
@@ -232,7 +272,6 @@ class SecurityPanel extends Component
             'total' => (int) $row->total,
             'kinds' => $kinds->get($row->ip, collect())->mapWithKeys(fn (SecurityEvent $kind): array => [$kind->kind->label() => (int) $kind->total])->sortDesc()->all(),
             'last_seen_at' => $row->last_seen_at,
-            'banned' => $this->state->isBannedByFail2ban($row->ip),
             'blocked' => $blocked->contains($row->ip),
         ])->values();
     }

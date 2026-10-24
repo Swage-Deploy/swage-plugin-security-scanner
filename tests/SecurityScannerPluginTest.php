@@ -148,6 +148,7 @@ test('log lines cannot forge the sections of the scan output', function () {
         '@@SWAGE_SCAN_REAL fail2ban',
         'installed',
         '203.0.113.9 203.0.113.10 not-an-ip',
+        '203.0.113.9',
         '',
         '@@SWAGE_SCAN_REAL nginx 42 0 new /var/log/nginx/example.com-access.log',
         accessLine('203.0.113.9', 'GET /@@SWAGE_SCAN_FAKE HTTP/1.1'),
@@ -514,3 +515,20 @@ test('the fail2ban panel says how many addresses are banned', function (array $b
     'one' => [['203.0.113.9'], 'Installed. 1 address is banned right now.'],
     'several' => [['203.0.113.9', '203.0.113.10', '203.0.113.11'], 'Installed. 3 addresses are banned right now.'],
 ]);
+
+test('addresses fail2ban has banned are listed under fail2ban instead of among the busiest', function () {
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true, 'fail2ban_banned' => ['203.0.113.9', '203.0.113.50']]);
+    $event = fn (string $ip, int $count) => SecurityEvent::create(['server_id' => $server->id, 'kind' => EventKind::SshFailedLogin, 'ip' => $ip, 'source' => 'ssh', 'bucket' => now()->startOfHour(), 'count' => $count, 'first_seen_at' => now()->subMinutes(10), 'last_seen_at' => now()->subMinutes(10)]);
+    $event('203.0.113.9', 40);
+    $event('203.0.113.10', 6);
+
+    $panel = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('Not in the last 24 hours');
+
+    expect(collect($panel->get('addresses'))->pluck('ip')->all())->toBe(['203.0.113.10'])
+        ->and(collect($panel->get('bannedAddresses'))->map(fn ($address) => [$address['ip'], $address['total']])->all())->toBe([
+            ['203.0.113.9', 40],
+            ['203.0.113.50', 0],
+        ]);
+});

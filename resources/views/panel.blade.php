@@ -96,45 +96,8 @@
             </flux:table>
         </x-panel>
 
-        <x-panel icon="globe-alt" :heading="__('Busiest hostile addresses')" :description="__('Failed logins, probes, login submissions and denied requests in the last 24 hours.')" flush>
-            <flux:table>
-                <flux:table.columns>
-                    <flux:table.column>{{ __('Address') }}</flux:table.column>
-                    <flux:table.column>{{ __('Events') }}</flux:table.column>
-                    <flux:table.column>{{ __('What') }}</flux:table.column>
-                    <flux:table.column>{{ __('Last seen') }}</flux:table.column>
-                    <flux:table.column></flux:table.column>
-                </flux:table.columns>
-                <flux:table.rows>
-                    @forelse ($this->addresses as $address)
-                        <flux:table.row :key="'address-'.$address['ip']">
-                            <flux:table.cell class="font-mono text-xs">
-                                {{ $address['ip'] }}
-                                @if ($address['banned'])
-                                    <flux:badge size="sm" class="ms-1">{{ __('Banned by fail2ban') }}</flux:badge>
-                                @endif
-                                @if ($address['blocked'])
-                                    <flux:badge size="sm" color="red" class="ms-1">{{ __('Blocked') }}</flux:badge>
-                                @endif
-                            </flux:table.cell>
-                            <flux:table.cell>{{ number_format($address['total']) }}</flux:table.cell>
-                            <flux:table.cell class="max-w-md truncate text-xs">
-                                {{ collect($address['kinds'])->map(fn ($count, $label) => "{$label}: {$count}")->implode(' · ') }}
-                            </flux:table.cell>
-                            <flux:table.cell :title="$address['last_seen_at']->toDayDateTimeString()">{{ $address['last_seen_at']->diffForHumans() }}</flux:table.cell>
-                            <flux:table.cell align="end">
-                                @if ($canManage && ! $address['blocked'])
-                                    <flux:button size="sm" variant="ghost" icon="no-symbol" wire:click="block('{{ $address['ip'] }}')" wire:confirm.danger="{{ __('Block every connection from :ip, including SSH and HTTP?', ['ip' => $address['ip']]) }}" :tooltip="__('Block in the firewall')" />
-                                @endif
-                            </flux:table.cell>
-                        </flux:table.row>
-                    @empty
-                        <flux:table.row>
-                            <flux:table.cell colspan="5">{{ __('Nothing hostile in the last 24 hours.') }}</flux:table.cell>
-                        </flux:table.row>
-                    @endforelse
-                </flux:table.rows>
-            </flux:table>
+        <x-panel icon="globe-alt" :heading="__('Busiest hostile addresses')" :description="__('Failed logins, probes, login submissions and denied requests in the last 24 hours. Addresses fail2ban has banned are listed under fail2ban.')" flush>
+            @include('security-scanner::address-table', ['addresses' => $this->addresses, 'empty' => __('Nothing hostile in the last 24 hours.')])
         </x-panel>
     @endif
 
@@ -185,6 +148,11 @@
     <x-panel icon="lock-closed" :heading="__('fail2ban')" :description="__('Bans addresses from SSH for an hour after five failed logins in ten minutes, and for a week once banned three times in a day.')">
         @if ($this->state->fail2ban_installed)
             <flux:text>{{ trans_choice('{0} Installed. No addresses are banned right now.|{1} Installed. :count address is banned right now.|[2,*] Installed. :count addresses are banned right now.', count($this->state->fail2ban_banned ?? []), ['count' => count($this->state->fail2ban_banned ?? [])]) }}</flux:text>
+            @if ($this->bannedAddresses->isNotEmpty())
+                <div class="mt-4">
+                    @include('security-scanner::address-table', ['addresses' => $this->bannedAddresses, 'empty' => ''])
+                </div>
+            @endif
         @else
             <flux:text>{{ $this->state->fail2ban_installed === false ? __('fail2ban is not installed on this server.') : __('Whether fail2ban is installed shows after the first scan.') }}</flux:text>
             @if ($canManage)

@@ -17,7 +17,7 @@ The scanner is turned on per server, from the server's **Plugins** tab.
 
 Each rule keeps at most one open alert per address or user. Further activity counts on that alert, and a new alert only opens after the earlier one is resolved. Swage's own SSH logins aren't counted: the scanner learns the address Swage connects from on each scan.
 
-The panel also shows totals for the last 24 hours, the ten busiest hostile addresses, the addresses blocked in the firewall, and whether fail2ban is installed and which addresses it has banned.
+The panel also shows totals for the last 24 hours, the ten busiest hostile addresses, the addresses blocked in the firewall, and whether fail2ban is installed. Addresses fail2ban has banned, in its `sshd` or `recidive` jail, are listed under fail2ban with what they did in the last 24 hours, rather than among the busiest addresses.
 
 ## How logs are read
 
