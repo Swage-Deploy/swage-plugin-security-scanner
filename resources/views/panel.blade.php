@@ -184,7 +184,7 @@
 
     <x-panel icon="lock-closed" :heading="__('fail2ban')" :description="__('Bans addresses from SSH for an hour after five failed logins in ten minutes, and for a week once banned three times in a day.')">
         @if ($this->state->fail2ban_installed)
-            <flux:text>{{ trans_choice('Installed. No addresses are banned right now.|Installed. :count address is banned right now.|Installed. :count addresses are banned right now.', count($this->state->fail2ban_banned ?? []), ['count' => count($this->state->fail2ban_banned ?? [])]) }}</flux:text>
+            <flux:text>{{ trans_choice('{0} Installed. No addresses are banned right now.|{1} Installed. :count address is banned right now.|[2,*] Installed. :count addresses are banned right now.', count($this->state->fail2ban_banned ?? []), ['count' => count($this->state->fail2ban_banned ?? [])]) }}</flux:text>
         @else
             <flux:text>{{ $this->state->fail2ban_installed === false ? __('fail2ban is not installed on this server.') : __('Whether fail2ban is installed shows after the first scan.') }}</flux:text>
             @if ($canManage)

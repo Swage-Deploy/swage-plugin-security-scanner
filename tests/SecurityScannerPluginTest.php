@@ -503,3 +503,14 @@ test('the busiest hostile addresses show when each was last seen, and blocked on
         ->and($addresses[0])->toMatchArray(['ip' => '203.0.113.9', 'total' => 35, 'blocked' => true])
         ->and($addresses[0]['last_seen_at']->toDateTimeString())->toBe('2026-10-23 11:30:00');
 });
+
+test('the fail2ban panel says how many addresses are banned', function (array $banned, string $text) {
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['fail2ban_installed' => true, 'fail2ban_banned' => $banned]);
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])->assertSee($text);
+})->with([
+    'none' => [[], 'Installed. No addresses are banned right now.'],
+    'one' => [['203.0.113.9'], 'Installed. 1 address is banned right now.'],
+    'several' => [['203.0.113.9', '203.0.113.10', '203.0.113.11'], 'Installed. 3 addresses are banned right now.'],
+]);
