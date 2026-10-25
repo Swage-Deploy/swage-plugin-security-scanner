@@ -30,6 +30,13 @@ final class ScanOutput
     public bool $fail2banInstalled = false;
 
     /**
+     * The jails fail2ban runs, or null when it could not say, such as on servers scanned before it was asked.
+     *
+     * @var list<string>|null
+     */
+    public ?array $fail2banJails = null;
+
+    /**
      * @var list<string>
      */
     public array $fail2banBanned = [];

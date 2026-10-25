@@ -48,7 +48,7 @@
     </x-panel>
 
     @if ($this->state->last_scanned_at || $this->alerts->isNotEmpty())
-        <x-panel icon="bell-alert" :heading="__('Open alerts')" flush>
+        <x-panel icon="bell-alert" :heading="__('Open alerts')" :description="__('SSH logins worth a look. Brute force attempts and probing are banned by fail2ban instead.')" flush>
             @if ($canManage && $this->alerts->isNotEmpty())
                 <x-slot:actions>
                     <flux:button size="sm" variant="ghost" icon="check" wire:click="resolveAll">{{ __('Resolve all') }}</flux:button>
@@ -73,14 +73,11 @@
                             </flux:table.cell>
                             <flux:table.cell class="font-mono text-xs">
                                 {{ $alert->subject }}
-                                @if ($alert->rule->concernsAddress() && $this->state->isBannedByFail2ban($alert->subject))
-                                    <flux:badge size="sm" class="ms-1">{{ __('Banned by fail2ban') }}</flux:badge>
-                                @endif
                             </flux:table.cell>
                             <flux:table.cell :title="$alert->last_seen_at->toDayDateTimeString()">{{ $alert->last_seen_at->diffForHumans() }}</flux:table.cell>
                             <flux:table.cell align="end">
                                 @if ($canManage)
-                                    @if ($alert->rule->concernsAddress() && ! $this->blockedAddresses->contains('ip', $alert->subject))
+                                    @if (! $this->blockedAddresses->contains('ip', $alert->subject))
                                         <flux:button size="sm" variant="ghost" icon="no-symbol" wire:click="blockFromAlert({{ $alert->id }})" wire:confirm.danger="{{ __('Block :ip from SSH and every site on this server?', ['ip' => $alert->subject]) }}" :tooltip="__('Block in the firewall')" />
                                     @endif
                                     <flux:button size="sm" variant="ghost" icon="check" wire:click="resolve({{ $alert->id }})" :tooltip="__('Resolve')" />
@@ -145,8 +142,19 @@
         </flux:table>
     </x-panel>
 
-    <x-panel icon="lock-closed" :heading="__('fail2ban')" :description="__('Bans addresses from SSH for an hour after five failed logins in ten minutes, and for a week once banned three times in a day.')">
+    <x-panel icon="lock-closed" :heading="__('fail2ban')" :description="__('Bans addresses from SSH for an hour after five failed logins in ten minutes, and from sites for an hour after :count probes for vulnerable files in an hour, in nginx too, so visitors through Cloudflare are banned as well. Addresses banned three times in a day are banned for a week.', ['count' => config('security-scanner.fail2ban_probes')])">
         @if ($this->state->fail2ban_installed)
+            @if ($this->state->needsFail2banUpdate())
+                <flux:callout icon="arrow-path" color="amber" class="mb-4">
+                    <flux:callout.heading>{{ __('fail2ban doesn\'t ban probing yet') }}</flux:callout.heading>
+                    <flux:callout.text>{{ __('It was installed before the scanner could ban addresses probing sites. Update it to add the probes jail.') }}</flux:callout.text>
+                    @if ($canManage)
+                        <x-slot:actions>
+                            <flux:button size="sm" icon="arrow-path" wire:click="installFail2ban">{{ __('Update fail2ban') }}</flux:button>
+                        </x-slot:actions>
+                    @endif
+                </flux:callout>
+            @endif
             <flux:text>{{ trans_choice('{0} Installed. No addresses are banned right now.|{1} Installed. :count address is banned right now.|[2,*] Installed. :count addresses are banned right now.', count($this->state->fail2ban_banned ?? []), ['count' => count($this->state->fail2ban_banned ?? [])]) }}</flux:text>
             @if ($this->bannedAddresses->isNotEmpty())
                 <div class="mt-4">

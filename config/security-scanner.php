@@ -7,12 +7,9 @@ return [
     // How many days of counted events are kept. Alerts are kept until 90 days after they are resolved.
     'retention_days' => (int) env('SECURITY_SCANNER_RETENTION_DAYS', 14),
 
-    // How many events from one address within the last hour raise an alert.
-    'thresholds' => [
-        'ssh_attempts' => (int) env('SECURITY_SCANNER_SSH_ATTEMPTS', 20),
-        'http_probes' => (int) env('SECURITY_SCANNER_HTTP_PROBES', 20),
-        'http_logins' => (int) env('SECURITY_SCANNER_HTTP_LOGINS', 30),
-    ],
+    // How many probes from one address within an hour make fail2ban ban it from the sites. Servers pick up a change
+    // when fail2ban is installed or updated from the panel.
+    'fail2ban_probes' => (int) env('SECURITY_SCANNER_HTTP_PROBES', 20),
 
     // Requests for paths matching these patterns are counted as probing. Laravel sites only serve index.php, so
     // requests for other PHP scripts, dotfiles and well known admin tools are almost always scanners.

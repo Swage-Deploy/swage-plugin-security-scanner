@@ -78,15 +78,10 @@ class SecurityAlert extends Model
     public function summary(): string
     {
         $details = $this->details ?? [];
-        $list = fn (string $key): string => implode(', ', array_slice($details[$key] ?? [], 0, 3));
 
         return match ($this->rule) {
-            AlertRule::SshBruteForce => __(':count attempts in the last hour, as :users.', ['count' => $details['count'] ?? 0, 'users' => $list('targets')]),
             AlertRule::SshLoginAfterFailures => __('Logged in as :user after :failed failed attempts from the same address.', ['user' => $details['user'] ?? '?', 'failed' => $details['failed_attempts'] ?? 0]),
             AlertRule::SshLoginNewAddress => __('Logged in as :user.', ['user' => $details['user'] ?? '?']),
-            AlertRule::SudoFailure => trans_choice(':user failed to use sudo once.|:user failed to use sudo :count times.', $this->occurrences, ['user' => $this->subject]),
-            AlertRule::HttpProbing => __(':count requests in the last hour on :sites, such as :paths', ['count' => $details['count'] ?? 0, 'sites' => $list('sources'), 'paths' => $list('targets')]),
-            AlertRule::HttpLoginBruteForce => __(':count login submissions in the last hour on :sites.', ['count' => $details['count'] ?? 0, 'sites' => $list('sources')]),
         };
     }
 

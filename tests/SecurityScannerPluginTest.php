@@ -83,6 +83,13 @@ class ScannedServer implements RemoteShell
 
         return new ScriptResult(exitCode: $this->exitCode, output: $output."\n{$marker} end\n");
     }
+
+    public function stream(Server $server, string $script, Closure $onOutput, int $timeout = 600): ScriptResult
+    {
+        return $this->run($server, $script, timeout: $timeout);
+    }
+
+    public function upload(Server $server, string $localPath, string $remotePath): void {}
 }
 
 function scannedServer(...$arguments): ScannedServer
@@ -232,7 +239,7 @@ test('only probes, login submissions, denied and missing requests are counted fr
     ])->and($events[0]->source)->toBe('example.com');
 });
 
-test('a scan counts events per address and hour, raises a brute force alert, and remembers where it stopped', function () {
+test('a scan counts events per address and hour, raises no alert for brute force attempts, and remembers where it stopped', function () {
     Event::fake([AlertRaised::class]);
     $server = Server::factory()->create();
 
@@ -255,11 +262,7 @@ test('a scan counts events per address and hour, raises a brute force alert, and
         ->and(SecurityEvent::where('kind', EventKind::SshLogin)->exists())->toBeFalse()
         ->and(SecurityEvent::where('kind', EventKind::HttpProbe)->sole()->source)->toBe('example.com');
 
-    expect(SecurityAlert::sole())
-        ->rule->toBe(AlertRule::SshBruteForce)
-        ->severity->toBe(AlertSeverity::Medium)
-        ->subject->toBe('203.0.113.9')
-        ->details->count->toBe(25);
+    expect(SecurityAlert::count())->toBe(0);
 
     expect($state)
         ->panel_address->toBe('198.51.100.1')
@@ -271,24 +274,26 @@ test('a scan counts events per address and hour, raises a brute force alert, and
             'files' => ['/var/log/nginx/example.com-access.log' => ['inode' => 42, 'offset' => strlen($content)]],
         ]);
 
-    Event::assertDispatchedTimes(AlertRaised::class, 1);
+    Event::assertNotDispatched(AlertRaised::class);
 });
 
-test('further attempts from an address count on its open alert rather than opening another', function () {
+test('further logins from an address count on its open alert rather than opening another', function () {
     Event::fake([AlertRaised::class]);
     $server = Server::factory()->create();
-    $probes = fn (int $count) => implode("\n", array_fill(0, $count, accessLine('203.0.113.20', 'GET /.env HTTP/1.1')))."\n";
+    $login = fn (string $time) => sshLine('Accepted password for deploy from 203.0.113.9 port 50001 ssh2', $time);
 
-    scannedServer(files: ['/var/log/nginx/access.log' => ['inode' => 1, 'start' => 0, 'new' => true, 'content' => $probes(20)]]);
+    scannedServer(journal: [
+        sshLine('Failed password for deploy from 203.0.113.9 port 50000 ssh2', '2026-10-23T11:50:00+00:00'),
+        $login('2026-10-23T11:52:00+00:00'),
+    ]);
     scan($server);
 
-    scannedServer(files: ['/var/log/nginx/access.log' => ['inode' => 1, 'start' => 0, 'new' => false, 'content' => $probes(5)]]);
+    scannedServer(journal: [$login('2026-10-23T11:55:00+00:00')]);
     scan($server);
 
     expect(SecurityAlert::sole())
-        ->rule->toBe(AlertRule::HttpProbing)
-        ->occurrences->toBe(2)
-        ->details->count->toBe(25);
+        ->rule->toBe(AlertRule::SshLoginAfterFailures)
+        ->occurrences->toBe(2);
 
     Event::assertDispatchedTimes(AlertRaised::class, 1);
 
@@ -296,6 +301,47 @@ test('further attempts from an address count on its open alert rather than openi
     scan($server);
 
     expect(SecurityAlert::count())->toBe(2);
+});
+
+test('fail2ban\'s jails and the addresses they banned are read from the scan', function () {
+    $server = Server::factory()->create();
+
+    scannedServer(banned: "jails sshd, recidive\n203.0.113.9\n203.0.113.10 203.0.113.9");
+    $state = scan($server);
+
+    expect($state)
+        ->fail2ban_jails->toBe(['sshd', 'recidive'])
+        ->fail2ban_banned->toBe(['203.0.113.9', '203.0.113.10']);
+});
+
+test('servers whose fail2ban has no probes jail are offered an update once they have sites\' logs', function (?array $jails, array $files, bool $needsUpdate) {
+    $server = Server::factory()->create();
+    $state = tap(ScannerState::for($server))->update(['last_scanned_at' => now(), 'fail2ban_installed' => true, 'fail2ban_jails' => $jails, 'cursors' => ['journal' => null, 'files' => $files]]);
+
+    expect($state->fresh()->needsFail2banUpdate())->toBe($needsUpdate);
+
+    $panel = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server]);
+    $needsUpdate ? $panel->assertSee('Update fail2ban') : $panel->assertDontSee('Update fail2ban');
+})->with([
+    'no probes jail' => [['sshd', 'recidive'], ['/var/log/nginx/access.log' => ['inode' => 1, 'offset' => 0]], true],
+    'probes jail' => [['sshd', 'recidive', 'swage-probes'], ['/var/log/nginx/access.log' => ['inode' => 1, 'offset' => 0]], false],
+    'no nginx' => [['sshd', 'recidive'], [], false],
+    'jails not read yet' => [null, ['/var/log/nginx/access.log' => ['inode' => 1, 'offset' => 0]], false],
+]);
+
+test('alerts about addresses fail2ban has banned or that are blocked are left out of the open alerts', function () {
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true, 'fail2ban_banned' => ['203.0.113.9']]);
+    BlockedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.10', 'status' => ResourceStatus::Installed]);
+    BlockedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.11', 'status' => ResourceStatus::Failed]);
+
+    foreach (['203.0.113.9', '203.0.113.10', '203.0.113.11', '203.0.113.12'] as $ip) {
+        SecurityAlert::create(['server_id' => $server->id, 'rule' => AlertRule::SshLoginNewAddress, 'severity' => AlertSeverity::Low, 'subject' => $ip, 'details' => ['user' => 'deploy'], 'first_seen_at' => now(), 'last_seen_at' => now()]);
+    }
+
+    $alerts = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])->get('alerts');
+
+    expect($alerts->pluck('subject')->sort()->values()->all())->toBe(['203.0.113.11', '203.0.113.12']);
 });
 
 test('a login from an address that was failing to log in raises a high alert', function () {
@@ -442,18 +488,18 @@ test('an alert about an address can block it, and alerts can be resolved', funct
     $server = Server::factory()->create();
     ScannerState::for($server)->update(['last_scanned_at' => now()]);
     $alert = SecurityAlert::create([
-        'server_id' => $server->id, 'rule' => AlertRule::SshBruteForce, 'severity' => AlertSeverity::Medium, 'subject' => '203.0.113.9',
-        'details' => ['count' => 40, 'targets' => ['root']], 'first_seen_at' => now(), 'last_seen_at' => now(),
+        'server_id' => $server->id, 'rule' => AlertRule::SshLoginAfterFailures, 'severity' => AlertSeverity::High, 'subject' => '203.0.113.9',
+        'details' => ['user' => 'root', 'failed_attempts' => 40], 'first_seen_at' => now(), 'last_seen_at' => now(),
     ]);
 
     Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
-        ->assertSee('Repeated SSH login attempts')
-        ->assertSee('40 attempts in the last hour, as root.')
+        ->assertSee('SSH login from an address that was failing to log in')
+        ->assertSee('Logged in as root after 40 failed attempts from the same address.')
         ->call('blockFromAlert', $alert->id)
         ->call('resolve', $alert->id)
         ->assertSee('No open alerts.');
 
-    expect(BlockedAddress::sole()->reason)->toBe('Repeated SSH login attempts')
+    expect(BlockedAddress::sole()->reason)->toBe('SSH login from an address that was failing to log in')
         ->and($alert->fresh()->resolved_by_id)->toBe($server->user->id);
 });
 
@@ -465,7 +511,24 @@ test('fail2ban is installed with the server\'s ssh port', function () {
 
     $shell->assertRan('apt-get install -yq -o DPkg::Lock::Timeout=300 fail2ban');
     $shell->assertRan("[sshd]\nenabled = true\nport = 2222");
+    $shell->assertRan("[swage-probes]\nenabled = true\nport = http,https\nfilter = swage-probes\nlogpath = /var/log/nginx/*access.log\nbackend = auto\nfindtime = 1h\nmaxretry = 20\n");
+    $shell->assertRan('prefregex = ^<HOST> \S+ \S+ \[\] "[A-Z]+ <F-CONTENT>[^ "]+</F-CONTENT>');
+    $shell->assertRan("failregex = (?i:/\.(env|git|svn|hg|aws|ssh|docker|vscode|idea|DS_Store|htpasswd|htaccess))\n            (?i:/wp-");
+    $shell->assertRan('(?i:(\.\./|%%2e%%2e))');
+    $shell->assertRan('ignoreip = 127.0.0.1/8 ::1 173.245.48.0/20');
+    $shell->assertRan("action = %(action_)s\n         swage-nginx-deny\n\n[recidive]\naction = %(action_)s\n         swage-nginx-deny");
+    $shell->assertRan("cat > /etc/fail2ban/action.d/swage-nginx-deny.conf <<'CONF'\n[Definition]");
+    $shell->assertRan("actionban = grep -qxF 'deny <ip>;' <file> || echo 'deny <ip>;' >> <file>\n            nginx -t -q && systemctl reload nginx");
+    $shell->assertRan("actionunban = grep -vxF 'deny <ip>;' <file> > <file>.tmp; mv <file>.tmp <file>");
+    $shell->assertRan('file = /etc/nginx/conf.d/swage-fail2ban-<name>.conf');
     expect(ScannerState::for($server)->fail2ban_installed)->toBeTrue();
+});
+
+test('the scan script reads the probes jail\'s bans and reloads it when a new access log appears', function () {
+    $script = (new ScanScript('@@M'))->render([]);
+
+    expect($script)->toContain('for jail in sshd recidive swage-probes; do')
+        ->and($script)->toContain('fail2ban-client reload swage-probes');
 });
 
 test('only people who manage the server can change the scanner, and others cannot see it', function () {
@@ -591,9 +654,8 @@ test('the scan script reads nginx\'s deny list', function () {
         ->and($script->parse("\n@@M nginx-deny\n\n@@M end\n")->nginxDenied)->toBeNull();
 });
 
-test('the plugin keeps its own list of cloudflare\'s ranges for swage releases without one, matching swage\'s', function () {
-    expect(CloudflareAddresses::RANGES)->toBe(CloudflareNetworks::RANGES)
-        ->and(CloudflareAddresses::ranges())->toBe(CloudflareNetworks::RANGES)
+test('cloudflare\'s ranges come from swage\'s own list', function () {
+    expect(CloudflareAddresses::ranges())->toBe(CloudflareNetworks::RANGES)
         ->and(CloudflareAddresses::contains('104.16.1.1'))->toBeTrue()
         ->and(CloudflareAddresses::contains('203.0.113.9'))->toBeFalse();
 });

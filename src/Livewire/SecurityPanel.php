@@ -26,8 +26,8 @@ use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
 
 /**
- * The security scanner's panel on a server's Plugins tab: whether scanning is on, open alerts, the busiest hostile
- * addresses of the last day, and the addresses blocked in the firewall.
+ * The security scanner's panel on a server's Plugins tab: whether scanning is on, open SSH login alerts, the busiest
+ * hostile addresses of the last day, the addresses blocked in the firewall, and fail2ban.
  */
 class SecurityPanel extends Component
 {
@@ -154,9 +154,7 @@ class SecurityPanel extends Component
     {
         $alert = SecurityAlert::query()->where('server_id', $this->server->id)->findOrFail($alertId);
 
-        if ($alert->rule->concernsAddress()) {
-            $this->block($alert->subject, $alert->rule->title());
-        }
+        $this->block($alert->subject, $alert->rule->title());
     }
 
     public function unblock(int $addressId): void
@@ -175,18 +173,28 @@ class SecurityPanel extends Component
 
         InstallFail2ban::dispatch($this->server);
 
-        Flux::toast(variant: 'success', text: __('Installing fail2ban. It shows as installed after the next scan.'));
+        Flux::toast(variant: 'success', text: $this->state->fail2ban_installed
+            ? __('Updating fail2ban\'s jails.')
+            : __('Installing fail2ban. It shows as installed after the next scan.'));
     }
 
     /**
+     * The open alerts, leaving out addresses fail2ban has banned or that are blocked, which can't reach the server.
+     *
      * @return Collection<int, SecurityAlert>
      */
     #[Computed]
     public function alerts(): Collection
     {
+        $banned = [
+            ...$this->state->fail2ban_banned ?? [],
+            ...$this->blockedAddresses->where('status', ResourceStatus::Installed)->pluck('ip'),
+        ];
+
         return SecurityAlert::query()
             ->where('server_id', $this->server->id)
             ->open()
+            ->whereNotIn('subject', $banned)
             ->latest('last_seen_at')
             ->limit(50)
             ->get()

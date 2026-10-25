@@ -12,13 +12,13 @@
 
 ---
 
-Reads each server's SSH, sudo and nginx access logs every few minutes, counts brute force attempts and probing, raises alerts, and lets you block addresses in the server's firewall. It can also install fail2ban on servers that don't have it.
+Reads each server's SSH, sudo and nginx access logs every few minutes, counts brute force attempts and probing, raises alerts about SSH logins, and lets you block addresses in the server's firewall. It can also install fail2ban, which bans the addresses behind brute force attempts and probing.
 
 The scanner is turned on per server, from the server's **Plugins** tab.
 
 ## Requirements
 
-- Swage `v1.0.0` or later, and `v1.0.9` or later to see visitors' addresses on sites proxied by Cloudflare
+- Swage `v1.0.0` or later
 - Ubuntu servers with `ufw`, which Swage sets up when it provisions them
 
 ## Installation
@@ -33,24 +33,41 @@ The scanner is turned on per server, from the server's **Plugins** tab.
 
 2. **Turn it on** for each server under **Servers → *server* → Plugins → Security scanner**.
 
-3. Optionally, **install fail2ban** from the same panel. It bans an address from SSH for an hour after five failed logins in ten minutes, and for a week once it has been banned three times in a day.
+3. Optionally, **install fail2ban** from the same panel. It bans an address:
+
+   - from SSH for an hour after five failed logins in ten minutes,
+   - from the server's sites for an hour after 20 probes for vulnerable files (see below) in an hour,
+   - and from everything for a week once it has been banned three times in a day.
+
+   Servers without nginx don't get the probes ban. If fail2ban was installed by an earlier version of the plugin, the panel offers **Update fail2ban** to add it.
 
 ## What it looks for
+
+The scanner counts failed and unknown-user SSH logins, failed sudo attempts, site login form submissions, denied requests, and probes for vulnerable files: requests for paths such as `/.env`, `/.git`, `/wp-login.php`, `/vendor/phpunit` or a PHP script other than `index.php`. These show in the panel's totals and busiest addresses, and fail2ban bans the addresses behind repeated SSH failures and probing.
+
+Only SSH logins raise alerts:
 
 | Alert | Severity | Raised when |
 |---|---|---|
 | SSH login from an address that was failing to log in | High | An address logs in over SSH after failing to log in during the previous day. |
-| Repeated SSH login attempts | Medium | One address makes 20 or more failed or unknown-user SSH logins within the last hour. |
-| Failed sudo attempts | Medium | A user other than root enters the wrong sudo password, or isn't in sudoers. |
-| Repeated login attempts on a site | Medium | One address submits a site's login form 30 or more times within the last hour. |
 | SSH login from a new address | Low | Someone logs in over SSH from an address the server hasn't been logged into from before. Logins found by the first scan become the known addresses. |
-| Probing for vulnerable files | Low | One address requests 20 or more paths such as `/.env`, `/.git`, `/wp-login.php`, `/vendor/phpunit` or a PHP script other than `index.php` within the last hour. |
 
 Events from Cloudflare's own addresses aren't counted. nginx logs them for requests it can't take a visitor's address from, such as ones for a hostname no site serves, and blocking one would cut off every visitor Cloudflare routes through it.
 
-Each rule keeps at most one open alert per address or user. Further activity counts on that alert, and a new alert only opens after the earlier one is resolved. Swage's own SSH logins aren't counted: the scanner learns the address Swage connects from on each scan.
+Each rule keeps at most one open alert per address. Further activity counts on that alert, and a new alert only opens after the earlier one is resolved. Swage's own SSH logins aren't counted: the scanner learns the address Swage connects from on each scan.
 
-The panel also shows totals for the last 24 hours, the ten busiest hostile addresses, the addresses blocked in the firewall, and whether fail2ban is installed. Addresses fail2ban has banned, in its `sshd` or `recidive` jail, are listed under fail2ban with what they did in the last 24 hours, rather than among the busiest addresses.
+The panel also shows totals for the last 24 hours, the ten busiest hostile addresses, the addresses blocked in the firewall, and whether fail2ban is installed. Addresses fail2ban has banned, in its `sshd`, `swage-probes` or `recidive` jail, are listed under fail2ban with what they did in the last 24 hours, rather than among the busiest addresses. Alerts about an address fail2ban has banned, or that is blocked, are left out of the open alerts while the ban or block lasts.
+
+### Banning probes with fail2ban
+
+The `swage-probes` jail reads every access log in `/var/log/nginx` and matches each request's path against the same patterns the scanner counts as probes. Cloudflare's addresses are never banned. When a new site's access log appears, the next scan reloads the jail so fail2ban reads it too.
+
+Its bans, and the week long `recidive` bans, are applied in two places, like blocking an address:
+
+- **The firewall**, on ports 80 and 443 for `swage-probes` and every port for `recidive`.
+- **nginx**, with a `deny <address>;` line in `/etc/nginx/conf.d/swage-fail2ban-<jail>.conf`, followed by a reload. Visitors to sites proxied by Cloudflare connect from Cloudflare's addresses, so the firewall never sees them, but nginx takes the visitor's address from Cloudflare's header and gives them a 403.
+
+Each jail keeps its own file, so an hour's ban ending doesn't lift a week's ban of the same address. fail2ban empties the files when it stops and fills them again when it starts. nginx is only reloaded when its config passes `nginx -t`.
 
 ## How logs are read
 
@@ -65,9 +82,8 @@ Log lines contain text that attackers choose, such as request paths and username
 
 ### Limits
 
-- Sites proxied by Cloudflare only log their visitors' addresses on Swage v1.0.9 and later, which takes them from Cloudflare's header. Before that, their requests are logged as Cloudflare's addresses, which the scanner leaves out, so attacks through Cloudflare aren't seen, and nginx's deny list can't match their visitors. Update Swage, then use **Apply upgrades** under **Security upgrades available** on each server's page, which applies the "See visitors' addresses behind Cloudflare" upgrade.
 - Lines written to an access log between the last scan and its rotation aren't read, which is at most a few minutes of one log per day.
-- On servers that accept SSH passwords, one failed password can be logged as both a failed password and a closed connection, and is counted twice. The thresholds are set with this in mind.
+- On servers that accept SSH passwords, one failed password can be logged as both a failed password and a closed connection, and is counted twice.
 
 ## Blocking addresses
 
@@ -93,9 +109,7 @@ These can be set in Swage's `.env`:
 |---|---|---|
 | `SECURITY_SCANNER_INTERVAL` | `2` | Minutes between scans of each server. |
 | `SECURITY_SCANNER_RETENTION_DAYS` | `14` | Days of counted events to keep. |
-| `SECURITY_SCANNER_SSH_ATTEMPTS` | `20` | Failed SSH logins from one address in an hour that raise an alert. |
-| `SECURITY_SCANNER_HTTP_PROBES` | `20` | Probes from one address in an hour that raise an alert. |
-| `SECURITY_SCANNER_HTTP_LOGINS` | `30` | Login form submissions from one address in an hour that raise an alert. |
+| `SECURITY_SCANNER_HTTP_PROBES` | `20` | Probes from one address in an hour before fail2ban bans it from the sites. Servers pick up a change when fail2ban is installed or updated. |
 
 Scans run on Swage's queue, one at a time per server, and aren't recorded in the server's activity log.
 

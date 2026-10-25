@@ -56,6 +56,7 @@ class LogScanner
             'cursors' => $this->cursors($state, $output),
             'panel_address' => $panelAddress,
             'fail2ban_installed' => $output->fail2banInstalled,
+            'fail2ban_jails' => $output->fail2banJails,
             'fail2ban_banned' => $output->fail2banBanned,
             'last_scanned_at' => now(),
             'last_error' => null,

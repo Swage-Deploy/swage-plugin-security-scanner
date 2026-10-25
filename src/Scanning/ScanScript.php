@@ -3,6 +3,7 @@
 namespace Swage\SecurityScanner\Scanning;
 
 use Illuminate\Support\Str;
+use Swage\SecurityScanner\Jobs\InstallFail2ban;
 use Swage\SecurityScanner\Models\BlockedAddress;
 
 /**
@@ -61,6 +62,7 @@ final readonly class ScanScript
         $backfill = self::BACKFILL_BYTES;
         $maxBytes = self::MAX_BYTES_PER_FILE;
         $maxLines = self::MAX_JOURNAL_LINES;
+        $probesJail = InstallFail2ban::PROBES_JAIL;
 
         return <<<BASH
         set -uo pipefail
@@ -80,7 +82,8 @@ final readonly class ScanScript
         section fail2ban
         if command -v fail2ban-client > /dev/null 2>&1; then
             echo installed
-            for jail in sshd recidive; do
+            echo "jails \$(fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p')"
+            for jail in sshd recidive {$probesJail}; do
                 fail2ban-client status "\$jail" 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p'
             done
         fi
@@ -92,11 +95,13 @@ final readonly class ScanScript
         fi
 
         declare -A known=({$known})
+        new_log=
         for f in /var/log/nginx/*access.log; do
             [ -f "\$f" ] || continue
             read -r inode size < <(stat -c '%i %s' -- "\$f")
             entry=\${known["\$f"]:-}
             if [ -z "\$entry" ]; then
+                new_log=1
                 start=\$(( size > {$backfill} ? size - {$backfill} : 0 ))
             elif [ "\${entry%%:*}" = "\$inode" ] && [ "\${entry#*:}" -le "\$size" ]; then
                 start=\${entry#*:}
@@ -108,6 +113,11 @@ final readonly class ScanScript
             section nginx "\$inode" "\$start" "\$([ -z "\$entry" ] && echo new || echo known)" "\$f"
             tail -c +\$(( start + 1 )) -- "\$f" | head -c "\$length"
         done
+
+        # fail2ban only finds the logs its probes jail reads when it loads the jail, so a new site's log needs a reload.
+        if [ -n "\$new_log" ] && command -v fail2ban-client > /dev/null 2>&1 && fail2ban-client status {$probesJail} > /dev/null 2>&1; then
+            fail2ban-client reload {$probesJail} > /dev/null 2>&1
+        fi
 
         section end
         BASH;
@@ -178,8 +188,16 @@ final readonly class ScanScript
         }
 
         $result->fail2banInstalled = true;
+
+        $rest = $lines[1] ?? '';
+
+        if (preg_match('/^jails ?(.*)$/m', $rest, $jails)) {
+            $result->fail2banJails = preg_split('/[\s,]+/', $jails[1], flags: PREG_SPLIT_NO_EMPTY) ?: [];
+            $rest = str_replace($jails[0], '', $rest);
+        }
+
         $result->fail2banBanned = array_values(array_unique(array_filter(
-            preg_split('/[\s,]+/', $lines[1] ?? '', flags: PREG_SPLIT_NO_EMPTY) ?: [],
+            preg_split('/[\s,]+/', $rest, flags: PREG_SPLIT_NO_EMPTY) ?: [],
             fn (string $ip): bool => filter_var($ip, FILTER_VALIDATE_IP) !== false,
         )));
     }

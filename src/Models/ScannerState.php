@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Swage\SecurityScanner\Jobs\InstallFail2ban;
 
 /**
  * Whether a server's logs are scanned, and where the last scan stopped reading each of them.
@@ -14,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array{journal?: string|null, files?: array<string, array{inode: int, offset: int}>}|null $cursors
  */
 #[Table('security_scanner_states')]
-#[Fillable(['server_id', 'enabled', 'cursors', 'panel_address', 'fail2ban_installed', 'fail2ban_banned', 'last_scanned_at', 'last_error'])]
+#[Fillable(['server_id', 'enabled', 'cursors', 'panel_address', 'fail2ban_installed', 'fail2ban_jails', 'fail2ban_banned', 'last_scanned_at', 'last_error'])]
 class ScannerState extends Model
 {
     /**
@@ -37,6 +38,7 @@ class ScannerState extends Model
             'enabled' => 'boolean',
             'cursors' => 'array',
             'fail2ban_installed' => 'boolean',
+            'fail2ban_jails' => 'array',
             'fail2ban_banned' => 'array',
             'last_scanned_at' => 'datetime',
         ];
@@ -65,10 +67,14 @@ class ScannerState extends Model
     }
 
     /**
-     * Determine if fail2ban has banned the address from SSH.
+     * Determine if fail2ban was installed before it banned addresses probing sites, so it needs updating to. Servers
+     * without nginx have no probes jail, and servers not scanned since this was checked can't tell.
      */
-    public function isBannedByFail2ban(string $ip): bool
+    public function needsFail2banUpdate(): bool
     {
-        return in_array($ip, $this->fail2ban_banned ?? [], true);
+        return $this->fail2ban_installed
+            && $this->fail2ban_jails !== null
+            && ! in_array(InstallFail2ban::PROBES_JAIL, $this->fail2ban_jails, true)
+            && collect($this->cursors['files'] ?? [])->isNotEmpty();
     }
 }
