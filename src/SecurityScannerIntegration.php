@@ -3,9 +3,10 @@
 namespace Swage\SecurityScanner;
 
 use App\Models\Server;
+use App\Plugins\HasPluginTab;
 use App\Servers\ServerIntegration;
 
-class SecurityScannerIntegration implements ServerIntegration
+class SecurityScannerIntegration implements HasPluginTab, ServerIntegration
 {
     public function id(): string
     {
@@ -15,6 +16,16 @@ class SecurityScannerIntegration implements ServerIntegration
     public function settingsComponent(): string
     {
         return 'security-scanner.panel';
+    }
+
+    public function tabLabel(): string
+    {
+        return __('Security scanner');
+    }
+
+    public function tabIcon(): string
+    {
+        return 'shield-check';
     }
 
     /**

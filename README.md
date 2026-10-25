@@ -18,7 +18,7 @@ The scanner is turned on per server, from the server's **Plugins** tab.
 
 ## Requirements
 
-- Swage `v1.0.0` or later
+- Swage `v1.0.1` or later
 - Ubuntu servers with `ufw`, which Swage sets up when it provisions them
 
 ## Installation
