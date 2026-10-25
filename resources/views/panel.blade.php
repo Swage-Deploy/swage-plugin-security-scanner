@@ -6,7 +6,7 @@
     $sshAttempts = collect(EventKind::sshAttempts())->sum(fn ($kind) => $totals[$kind->value] ?? 0);
 @endphp
 
-<div class="flex flex-col gap-6" @if ($enabled || $this->blockedAddresses->contains(fn ($address) => $address->status->isBusy())) wire:poll.15s @endif>
+<div class="flex flex-col gap-6" @if ($enabled || $this->blocked->contains(fn ($address) => $address->status->isBusy())) wire:poll.15s @endif>
     <x-panel icon="shield-check" :heading="__('Security scanner')" :description="__('Reads this server\'s SSH, sudo and nginx logs every few minutes for brute force attempts and probing.')">
         <x-slot:actions>
             @if ($enabled && $canManage)
@@ -47,15 +47,15 @@
         </div>
     </x-panel>
 
-    @if ($this->state->last_scanned_at || $this->alerts->isNotEmpty())
+    @if ($this->state->last_scanned_at || $this->alerts->total() > 0)
         <x-panel icon="bell-alert" :heading="__('Open alerts')" :description="__('SSH logins worth a look. Brute force attempts and probing are banned by fail2ban instead.')" flush>
-            @if ($canManage && $this->alerts->isNotEmpty())
+            @if ($canManage && $this->alerts->total() > 0)
                 <x-slot:actions>
                     <flux:button size="sm" variant="ghost" icon="check" wire:click="resolveAll">{{ __('Resolve all') }}</flux:button>
                 </x-slot:actions>
             @endif
 
-            <flux:table>
+            <flux:table :paginate="$this->alerts" pagination:class="px-5 pb-3">
                 <flux:table.columns>
                     <flux:table.column>{{ __('Severity') }}</flux:table.column>
                     <flux:table.column>{{ __('Alert') }}</flux:table.column>
@@ -77,7 +77,7 @@
                             <flux:table.cell :title="$alert->last_seen_at->toDayDateTimeString()">{{ $alert->last_seen_at->diffForHumans() }}</flux:table.cell>
                             <flux:table.cell align="end">
                                 @if ($canManage)
-                                    @if (! $this->blockedAddresses->contains('ip', $alert->subject))
+                                    @if (! $this->blocked->contains('ip', $alert->subject))
                                         <flux:button size="sm" variant="ghost" icon="no-symbol" wire:click="blockFromAlert({{ $alert->id }})" wire:confirm.danger="{{ __('Block :ip from SSH and every site on this server?', ['ip' => $alert->subject]) }}" :tooltip="__('Block in the firewall')" />
                                     @endif
                                     <flux:button size="sm" variant="ghost" icon="check" wire:click="resolve({{ $alert->id }})" :tooltip="__('Resolve')" />
@@ -107,7 +107,7 @@
             </x-slot:actions>
         @endif
 
-        <flux:table>
+        <flux:table :paginate="$this->blockedAddresses" pagination:class="px-5 pb-3">
             <flux:table.columns>
                 <flux:table.column>{{ __('Address') }}</flux:table.column>
                 <flux:table.column>{{ __('Reason') }}</flux:table.column>
@@ -156,9 +156,9 @@
                 </flux:callout>
             @endif
             <flux:text>{{ trans_choice('{0} Installed. No addresses are banned right now.|{1} Installed. :count address is banned right now.|[2,*] Installed. :count addresses are banned right now.', count($this->state->fail2ban_banned ?? []), ['count' => count($this->state->fail2ban_banned ?? [])]) }}</flux:text>
-            @if ($this->bannedAddresses->isNotEmpty())
+            @if ($this->bannedAddresses->total() > 0)
                 <div class="mt-4">
-                    @include('security-scanner::address-table', ['addresses' => $this->bannedAddresses, 'empty' => ''])
+                    @include('security-scanner::address-table', ['addresses' => $this->bannedAddresses, 'empty' => '', 'paginationClass' => ''])
                 </div>
             @endif
         @else

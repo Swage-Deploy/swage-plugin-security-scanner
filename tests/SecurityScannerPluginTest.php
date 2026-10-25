@@ -575,6 +575,30 @@ test('the busiest hostile addresses show when each was last seen, and blocked on
         ->and($addresses[0]['last_seen_at']->toDateTimeString())->toBe('2026-10-23 11:30:00');
 });
 
+test('each of the panel\'s tables shows ten rows a page', function () {
+    $server = Server::factory()->create();
+    $ips = collect(range(1, 12))->map(fn (int $i): string => "203.0.113.{$i}");
+    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true, 'fail2ban_banned' => collect(range(1, 12))->map(fn (int $i): string => "198.51.100.{$i}")->all()]);
+
+    foreach ($ips as $i => $ip) {
+        BlockedAddress::create(['server_id' => $server->id, 'ip' => "192.0.2.{$i}", 'status' => ResourceStatus::Installed]);
+        SecurityAlert::create(['server_id' => $server->id, 'rule' => AlertRule::SshLoginNewAddress, 'severity' => AlertSeverity::Low, 'subject' => $ip, 'details' => ['user' => 'deploy'], 'first_seen_at' => now(), 'last_seen_at' => now()]);
+        SecurityEvent::create(['server_id' => $server->id, 'kind' => EventKind::HttpProbe, 'ip' => $ip, 'source' => 'nginx', 'bucket' => now()->startOfHour(), 'count' => 100 - $i, 'first_seen_at' => now()->subMinutes(5), 'last_seen_at' => now()->subMinutes(5)]);
+    }
+
+    $panel = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server]);
+
+    foreach (['alerts' => 'alertsPage', 'addresses' => 'addressesPage', 'blockedAddresses' => 'blockedPage', 'bannedAddresses' => 'bannedPage'] as $table => $pageName) {
+        expect($panel->get($table))->toHaveCount(10)->and($panel->get($table)->total())->toBe(12);
+
+        $panel->call('setPage', 2, $pageName);
+
+        expect($panel->get($table))->toHaveCount(2)->and($panel->get($table)->currentPage())->toBe(2);
+    }
+
+    expect($panel->get('addresses')->getCollection()->pluck('ip')->all())->toBe(['203.0.113.11', '203.0.113.12']);
+});
+
 test('the fail2ban panel says how many addresses are banned', function (array $banned, string $text) {
     $server = Server::factory()->create();
     ScannerState::for($server)->update(['fail2ban_installed' => true, 'fail2ban_banned' => $banned]);
@@ -596,8 +620,8 @@ test('addresses fail2ban has banned are listed under fail2ban instead of among t
     $panel = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
         ->assertSee('Not in the last 24 hours');
 
-    expect(collect($panel->get('addresses'))->pluck('ip')->all())->toBe(['203.0.113.10'])
-        ->and(collect($panel->get('bannedAddresses'))->map(fn ($address) => [$address['ip'], $address['total']])->all())->toBe([
+    expect($panel->get('addresses')->getCollection()->pluck('ip')->all())->toBe(['203.0.113.10'])
+        ->and($panel->get('bannedAddresses')->getCollection()->map(fn ($address) => [$address['ip'], $address['total']])->all())->toBe([
             ['203.0.113.9', 40],
             ['203.0.113.50', 0],
         ]);

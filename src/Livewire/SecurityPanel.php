@@ -5,16 +5,19 @@ namespace Swage\SecurityScanner\Livewire;
 use App\Enums\ResourceStatus;
 use App\Models\Server;
 use Carbon\CarbonInterface;
-use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
+use Livewire\WithPagination;
 use Swage\SecurityScanner\CloudflareAddresses;
+use Swage\SecurityScanner\Enums\AlertSeverity;
 use Swage\SecurityScanner\Enums\EventKind;
 use Swage\SecurityScanner\Jobs\BlockAddress;
 use Swage\SecurityScanner\Jobs\InstallFail2ban;
@@ -31,6 +34,13 @@ use Swage\SecurityScanner\Models\SecurityEvent;
  */
 class SecurityPanel extends Component
 {
+    use WithPagination;
+
+    /**
+     * How many rows each of the panel's tables shows at a time.
+     */
+    public const int PER_PAGE = 10;
+
     public Server $server;
 
     public bool $enabled = false;
@@ -91,6 +101,8 @@ class SecurityPanel extends Component
             'resolved_at' => now(),
             'resolved_by_id' => auth()->id(),
         ]);
+
+        $this->resetPage('alertsPage');
     }
 
     /**
@@ -179,27 +191,28 @@ class SecurityPanel extends Component
     }
 
     /**
-     * The open alerts, leaving out addresses fail2ban has banned or that are blocked, which can't reach the server.
+     * The open alerts, most severe first, leaving out addresses fail2ban has banned or that are blocked, which can't
+     * reach the server.
      *
-     * @return Collection<int, SecurityAlert>
+     * @return LengthAwarePaginator<int, SecurityAlert>
      */
     #[Computed]
-    public function alerts(): Collection
+    public function alerts(): LengthAwarePaginator
     {
         $banned = [
             ...$this->state->fail2ban_banned ?? [],
-            ...$this->blockedAddresses->where('status', ResourceStatus::Installed)->pluck('ip'),
+            ...$this->blocked->where('status', ResourceStatus::Installed)->pluck('ip'),
         ];
+
+        $severity = collect(AlertSeverity::cases())->map(fn (AlertSeverity $severity): string => "when '{$severity->value}' then {$severity->rank()}")->implode(' ');
 
         return SecurityAlert::query()
             ->where('server_id', $this->server->id)
             ->open()
             ->whereNotIn('subject', $banned)
+            ->orderByRaw("case severity {$severity} else 0 end desc")
             ->latest('last_seen_at')
-            ->limit(50)
-            ->get()
-            ->sortByDesc(fn (SecurityAlert $alert): int => $alert->severity->rank())
-            ->values();
+            ->paginate(self::PER_PAGE, pageName: 'alertsPage');
     }
 
     /**
@@ -224,65 +237,79 @@ class SecurityPanel extends Component
      * The addresses with the most hostile events in the last day, leaving out those fail2ban has banned, which are
      * listed in the fail2ban panel instead.
      *
-     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
+     * @return LengthAwarePaginator<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
      */
     #[Computed]
-    public function addresses(): SupportCollection
+    public function addresses(): LengthAwarePaginator
     {
-        return $this->hostileAddresses(fn (Builder $query) => $query->whereNotIn('ip', $this->state->fail2ban_banned ?? [])->limit(10));
+        $page = $this->hostileEvents()
+            ->whereNotIn('ip', $this->state->fail2ban_banned ?? [])
+            ->selectRaw('ip, sum(count) as total, max(last_seen_at) as last_seen_at')
+            ->groupBy('ip')
+            ->orderByDesc('total')
+            ->orderBy('ip')
+            ->paginate(self::PER_PAGE, pageName: 'addressesPage');
+
+        return $page->setCollection($this->describe($page->getCollection()));
     }
 
     /**
-     * The addresses fail2ban has banned, with what they did in the last day. An address banned for longer, such as by
-     * the week long recidive jail, may have nothing recorded in the last day.
+     * The addresses fail2ban has banned, with what they did in the last day, busiest first. An address banned for
+     * longer, such as by the week long recidive jail, may have nothing recorded in the last day.
      *
-     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
+     * @return LengthAwarePaginator<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
      */
     #[Computed]
-    public function bannedAddresses(): SupportCollection
+    public function bannedAddresses(): LengthAwarePaginator
     {
         $banned = $this->state->fail2ban_banned ?? [];
+        $page = Paginator::resolveCurrentPage('bannedPage');
 
-        if ($banned === []) {
-            return collect();
-        }
+        $active = $banned === [] ? collect() : $this->hostileEvents()
+            ->whereIn('ip', $banned)
+            ->selectRaw('ip, sum(count) as total, max(last_seen_at) as last_seen_at')
+            ->groupBy('ip')
+            ->orderByDesc('total')
+            ->orderBy('ip')
+            ->get();
 
-        $active = $this->hostileAddresses(fn (Builder $query) => $query->whereIn('ip', $banned));
-        $blocked = $this->blockedAddresses->pluck('ip');
+        $all = $active->pluck('ip')->concat(collect($banned)->diff($active->pluck('ip'))->values());
+        $rows = $active->keyBy('ip');
 
-        return $active->concat(
-            collect($banned)
-                ->diff($active->pluck('ip'))
-                ->map(fn (string $ip): array => ['ip' => $ip, 'total' => 0, 'kinds' => [], 'last_seen_at' => null, 'blocked' => $blocked->contains($ip)])
-        )->values();
+        $described = $this->describe(
+            $all->forPage($page, self::PER_PAGE)->map(fn (string $ip): SecurityEvent => $rows->get($ip) ?? new SecurityEvent(['ip' => $ip]))->values()
+        );
+
+        return new LengthAwarePaginator($described, $all->count(), self::PER_PAGE, $page, [
+            'path' => Paginator::resolveCurrentPath(),
+            'pageName' => 'bannedPage',
+        ]);
     }
 
     /**
-     * Rank addresses by their hostile events in the last day, and say what the events were and when the address was
-     * last seen.
-     *
-     * @param  Closure(Builder<SecurityEvent>): mixed  $scope
-     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
+     * @return Builder<SecurityEvent>
      */
-    protected function hostileAddresses(Closure $scope): SupportCollection
+    protected function hostileEvents(): Builder
     {
-        $query = fn () => SecurityEvent::query()
+        return SecurityEvent::query()
             ->where('server_id', $this->server->id)
             ->whereNotNull('ip')
             ->whereIn('kind', EventKind::hostile())
             ->where('last_seen_at', '>=', now()->subDay());
+    }
 
-        $top = $query()
-            ->selectRaw('ip, sum(count) as total, max(last_seen_at) as last_seen_at')
-            ->groupBy('ip')
-            ->orderByDesc('total')
-            ->tap($scope)
-            ->get();
+    /**
+     * Say what each address's hostile events in the last day were, and whether it is blocked.
+     *
+     * @param  SupportCollection<int, SecurityEvent>  $rows
+     * @return SupportCollection<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
+     */
+    protected function describe(SupportCollection $rows): SupportCollection
+    {
+        $kinds = $this->hostileEvents()->whereIn('ip', $rows->pluck('ip'))->selectRaw('ip, kind, sum(count) as total')->groupBy('ip', 'kind')->get()->groupBy('ip');
+        $blocked = $this->blocked->pluck('ip');
 
-        $kinds = $query()->whereIn('ip', $top->pluck('ip'))->selectRaw('ip, kind, sum(count) as total')->groupBy('ip', 'kind')->get()->groupBy('ip');
-        $blocked = $this->blockedAddresses->pluck('ip');
-
-        return $top->map(fn (SecurityEvent $row): array => [
+        return $rows->map(fn (SecurityEvent $row): array => [
             'ip' => $row->ip,
             'total' => (int) $row->total,
             'kinds' => $kinds->get($row->ip, collect())->mapWithKeys(fn (SecurityEvent $kind): array => [$kind->kind->label() => (int) $kind->total])->sortDesc()->all(),
@@ -292,12 +319,28 @@ class SecurityPanel extends Component
     }
 
     /**
+     * Every address blocked on the server, for marking addresses as blocked elsewhere in the panel.
+     *
      * @return Collection<int, BlockedAddress>
      */
     #[Computed]
-    public function blockedAddresses(): Collection
+    public function blocked(): Collection
     {
-        return BlockedAddress::query()->where('server_id', $this->server->id)->with('blockedBy')->latest()->get();
+        return BlockedAddress::query()->where('server_id', $this->server->id)->get(['id', 'ip', 'status']);
+    }
+
+    /**
+     * @return LengthAwarePaginator<int, BlockedAddress>
+     */
+    #[Computed]
+    public function blockedAddresses(): LengthAwarePaginator
+    {
+        return BlockedAddress::query()
+            ->where('server_id', $this->server->id)
+            ->with('blockedBy')
+            ->latest()
+            ->latest('id')
+            ->paginate(self::PER_PAGE, pageName: 'blockedPage');
     }
 
     public function render(): View

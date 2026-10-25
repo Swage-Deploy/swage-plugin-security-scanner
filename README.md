@@ -56,7 +56,7 @@ Events from Cloudflare's own addresses aren't counted. nginx logs them for reque
 
 Each rule keeps at most one open alert per address. Further activity counts on that alert, and a new alert only opens after the earlier one is resolved. Swage's own SSH logins aren't counted: the scanner learns the address Swage connects from on each scan.
 
-The panel also shows totals for the last 24 hours, the ten busiest hostile addresses, the addresses blocked in the firewall, and whether fail2ban is installed. Addresses fail2ban has banned, in its `sshd`, `swage-probes` or `recidive` jail, are listed under fail2ban with what they did in the last 24 hours, rather than among the busiest addresses. Alerts about an address fail2ban has banned, or that is blocked, are left out of the open alerts while the ban or block lasts.
+The panel also shows totals for the last 24 hours, the busiest hostile addresses, the addresses blocked in the firewall, and whether fail2ban is installed. Each table shows ten rows a page. Addresses fail2ban has banned, in its `sshd`, `swage-probes` or `recidive` jail, are listed under fail2ban with what they did in the last 24 hours, rather than among the busiest addresses. Alerts about an address fail2ban has banned, or that is blocked, are left out of the open alerts while the ban or block lasts.
 
 ### Banning probes with fail2ban
 

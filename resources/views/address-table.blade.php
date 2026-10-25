@@ -1,4 +1,4 @@
-<flux:table>
+<flux:table :paginate="$addresses" pagination:class="{{ $paginationClass ?? 'px-5 pb-3' }}">
     <flux:table.columns>
         <flux:table.column>{{ __('Address') }}</flux:table.column>
         <flux:table.column>{{ __('Events') }}</flux:table.column>
