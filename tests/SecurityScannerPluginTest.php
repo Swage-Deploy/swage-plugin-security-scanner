@@ -329,6 +329,32 @@ test('servers whose fail2ban has no probes jail are offered an update once they 
     'jails not read yet' => [null, ['/var/log/nginx/access.log' => ['inode' => 1, 'offset' => 0]], false],
 ]);
 
+test('servers whose fail2ban could ban swage\'s own address are offered an update', function () {
+    $server = Server::factory()->create();
+
+    scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel no\n203.0.113.9");
+    $state = scan($server);
+
+    expect($state)
+        ->fail2ban_ignores_panel->toBeFalse()
+        ->fail2ban_banned->toBe(['203.0.113.9'])
+        ->and($state->needsFail2banUpdate())->toBeTrue();
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('fail2ban could lock Swage out of this server')
+        ->assertSee('Update fail2ban');
+
+    scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel yes\n203.0.113.9");
+
+    expect(scan($server))
+        ->fail2ban_ignores_panel->toBeTrue()
+        ->and(ScannerState::for($server)->needsFail2banUpdate())->toBeFalse();
+});
+
+test('the scan script asks whether fail2ban leaves swage\'s address alone', function () {
+    expect((new ScanScript('@@M'))->render([]))->toContain("grep -qs '^ignoreip = ' /etc/fail2ban/jail.d/swage.conf && echo 'ignores-panel yes' || echo 'ignores-panel no'");
+});
+
 test('alerts about addresses fail2ban has banned or that are blocked are left out of the open alerts', function () {
     $server = Server::factory()->create();
     ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true, 'fail2ban_banned' => ['203.0.113.9']]);
@@ -515,13 +541,33 @@ test('fail2ban is installed with the server\'s ssh port', function () {
     $shell->assertRan('prefregex = ^<HOST> \S+ \S+ \[\] "[A-Z]+ <F-CONTENT>[^ "]+</F-CONTENT>');
     $shell->assertRan("failregex = (?i:/\.(env|git|svn|hg|aws|ssh|docker|vscode|idea|DS_Store|htpasswd|htaccess))\n            (?i:/wp-");
     $shell->assertRan('(?i:(\.\./|%%2e%%2e))');
-    $shell->assertRan('ignoreip = 127.0.0.1/8 ::1 173.245.48.0/20');
+    $shell->assertRan('ignoreip = 127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 173.245.48.0/20');
     $shell->assertRan("action = %(action_)s\n         swage-nginx-deny\n\n[recidive]\naction = %(action_)s\n         swage-nginx-deny");
     $shell->assertRan("cat > /etc/fail2ban/action.d/swage-nginx-deny.conf <<'CONF'\n[Definition]");
     $shell->assertRan("actionban = grep -qxF 'deny <ip>;' <file> || echo 'deny <ip>;' >> <file>\n            nginx -t -q && systemctl reload nginx");
     $shell->assertRan("actionunban = grep -vxF 'deny <ip>;' <file> > <file>.tmp; mv <file>.tmp <file>");
     $shell->assertRan('file = /etc/nginx/conf.d/swage-fail2ban-<name>.conf');
-    expect(ScannerState::for($server)->fail2ban_installed)->toBeTrue();
+    expect(ScannerState::for($server))
+        ->fail2ban_installed->toBeTrue()
+        ->fail2ban_ignores_panel->toBeTrue();
+});
+
+test('fail2ban never bans the address swage connects from', function () {
+    $shell = fakeShell();
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['panel_address' => '198.51.100.7']);
+
+    app()->call([new InstallFail2ban($server), 'handle']);
+
+    $script = $shell->lastScript();
+
+    expect($script)
+        ->toContain('panel_address=${SSH_CLIENT%% *}')
+        ->toContain("[DEFAULT]\nignoreip = 127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 198.51.100.7\n")
+        ->toContain('ignoreip = 127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 198.51.100.7 173.245.48.0/20')
+        ->toContain('sed -i "s/@SWAGE_PANEL_ADDRESS@/$panel_address/" /etc/fail2ban/jail.d/swage.conf')
+        ->toContain('sed -i "s/@SWAGE_PANEL_ADDRESS@/$panel_address/" /etc/fail2ban/jail.d/swage-probes.conf')
+        ->and(strpos($script, 'panel_address=${SSH_CLIENT'))->toBeLessThan(strpos($script, 'systemctl restart fail2ban'));
 });
 
 test('the scan script reads the probes jail\'s bans and reloads it when a new access log appears', function () {

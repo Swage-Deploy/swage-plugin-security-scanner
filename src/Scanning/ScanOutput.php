@@ -42,6 +42,11 @@ final class ScanOutput
     public array $fail2banBanned = [];
 
     /**
+     * Whether fail2ban's jails leave Swage's address alone, or null when fail2ban is not installed.
+     */
+    public ?bool $fail2banIgnoresPanel = null;
+
+    /**
      * The addresses in nginx's deny list, or null when the server does not run nginx.
      *
      * @var list<string>|null

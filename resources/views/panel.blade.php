@@ -146,8 +146,13 @@
         @if ($this->state->fail2ban_installed)
             @if ($this->state->needsFail2banUpdate())
                 <flux:callout icon="arrow-path" color="amber" class="mb-4">
-                    <flux:callout.heading>{{ __('fail2ban doesn\'t ban probing yet') }}</flux:callout.heading>
-                    <flux:callout.text>{{ __('It was installed before the scanner could ban addresses probing sites. Update it to add the probes jail.') }}</flux:callout.text>
+                    @if ($this->state->fail2banCanBanPanel())
+                        <flux:callout.heading>{{ __('fail2ban could lock Swage out of this server') }}</flux:callout.heading>
+                        <flux:callout.text>{{ __('It was installed before it left Swage\'s own address alone, so a few failed logins or probes from that address would ban Swage. Update it to exempt the address.') }}</flux:callout.text>
+                    @else
+                        <flux:callout.heading>{{ __('fail2ban doesn\'t ban probing yet') }}</flux:callout.heading>
+                        <flux:callout.text>{{ __('It was installed before the scanner could ban addresses probing sites. Update it to add the probes jail.') }}</flux:callout.text>
+                    @endif
                     @if ($canManage)
                         <x-slot:actions>
                             <flux:button size="sm" icon="arrow-path" wire:click="installFail2ban">{{ __('Update fail2ban') }}</flux:button>

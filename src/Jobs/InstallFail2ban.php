@@ -18,6 +18,9 @@ use Swage\SecurityScanner\Models\ScannerState;
  * scanner's own probe patterns, and they count towards the week's ban too. Bans from the probes and recidive jails
  * are also denied in nginx, which takes the visitor's address from Cloudflare, so visitors to sites proxied by
  * Cloudflare are banned too. Running it again updates the jails.
+ *
+ * Swage's own address is never banned, since that would lock Swage out of the server. It is taken from the SSH
+ * connection the install runs over, as well as the address the scanner last saw Swage connect from.
  */
 class InstallFail2ban implements ShouldBeUnique, ShouldQueue
 {
@@ -33,6 +36,11 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
      * ban in place.
      */
     public const string NGINX_ACTION = 'swage-nginx-deny';
+
+    /**
+     * Stands in for Swage's address in the jails until the install script fills it in from its SSH connection.
+     */
+    public const string PANEL_ADDRESS = '@SWAGE_PANEL_ADDRESS@';
 
     public int $timeout = 600;
 
@@ -56,17 +64,24 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         $probesFilter = $this->probesFilter();
         $action = self::NGINX_ACTION;
         $nginxAction = $this->nginxAction();
+        $panelAddress = self::PANEL_ADDRESS;
+        $ignore = $this->ignored();
 
         $runTask->run($this->server, 'Installing fail2ban', <<<BASH
         set -Eeuo pipefail
 
         export DEBIAN_FRONTEND=noninteractive
 
+        # This runs over Swage's SSH connection, so the address it comes from is Swage's.
+        panel_address=\${SSH_CLIENT%% *}
+        [[ "\$panel_address" =~ ^[0-9A-Fa-f:.]+$ ]] || panel_address=''
+
         apt-get update -q
         apt-get install -yq -o DPkg::Lock::Timeout=300 fail2ban
 
         cat > /etc/fail2ban/jail.d/swage.conf <<'CONF'
         [DEFAULT]
+        ignoreip = {$ignore}
         bantime = 1h
         findtime = 10m
         maxretry = 5
@@ -82,6 +97,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         findtime = 1d
         maxretry = 3
         CONF
+        sed -i "s/{$panelAddress}/\$panel_address/" /etc/fail2ban/jail.d/swage.conf
 
         # fail2ban won't start with a jail that has no logs, so servers without nginx don't get the probes jail.
         if compgen -G '/var/log/nginx/*access.log' > /dev/null; then
@@ -94,6 +110,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         cat > /etc/fail2ban/jail.d/{$jail}.conf <<'CONF'
         {$probesJail}
         CONF
+        sed -i "s/{$panelAddress}/\$panel_address/" /etc/fail2ban/jail.d/{$jail}.conf
         else
             rm -f /etc/fail2ban/jail.d/{$jail}.conf
         fi
@@ -104,7 +121,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         echo "fail2ban is installed."
         BASH);
 
-        ScannerState::for($this->server)->update(['fail2ban_installed' => true]);
+        ScannerState::for($this->server)->update(['fail2ban_installed' => true, 'fail2ban_ignores_panel' => true]);
     }
 
     /**
@@ -114,7 +131,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
     protected function probesJail(): string
     {
         $maxRetry = (int) config('security-scanner.fail2ban_probes');
-        $ignore = implode(' ', ['127.0.0.1/8', '::1', ...CloudflareAddresses::ranges()]);
+        $ignore = $this->ignored(CloudflareAddresses::ranges());
         $jail = self::PROBES_JAIL;
 
         return implode("\n", [
@@ -135,6 +152,24 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
             'action = %(action_)s',
             '         '.self::NGINX_ACTION,
         ]);
+    }
+
+    /**
+     * The addresses a jail never bans: the server itself, Swage, and any others given.
+     *
+     * @param  list<string>  $others
+     */
+    protected function ignored(array $others = []): string
+    {
+        $known = ScannerState::for($this->server)->panel_address;
+
+        return implode(' ', array_filter([
+            '127.0.0.1/8',
+            '::1',
+            self::PANEL_ADDRESS,
+            filter_var($known, FILTER_VALIDATE_IP) ? $known : null,
+            ...$others,
+        ]));
     }
 
     /**

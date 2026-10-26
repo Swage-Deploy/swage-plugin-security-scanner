@@ -39,7 +39,7 @@ The scanner is turned on per server, from the server's **Plugins** tab.
    - from the server's sites for an hour after 20 probes for vulnerable files (see below) in an hour,
    - and from everything for a week once it has been banned three times in a day.
 
-   Servers without nginx don't get the probes ban. If fail2ban was installed by an earlier version of the plugin, the panel offers **Update fail2ban** to add it.
+   Servers without nginx don't get the probes ban. No jail ever bans the address Swage connects from, so failed logins or probes from it cannot lock Swage out. The address is taken from Swage's SSH connection when fail2ban is installed. If fail2ban was installed by an earlier version of the plugin, without the probes ban or without leaving Swage's address alone, the panel offers **Update fail2ban**.
 
 ## What it looks for
 

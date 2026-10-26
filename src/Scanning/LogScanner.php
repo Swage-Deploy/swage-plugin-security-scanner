@@ -58,6 +58,7 @@ class LogScanner
             'fail2ban_installed' => $output->fail2banInstalled,
             'fail2ban_jails' => $output->fail2banJails,
             'fail2ban_banned' => $output->fail2banBanned,
+            'fail2ban_ignores_panel' => $output->fail2banIgnoresPanel,
             'last_scanned_at' => now(),
             'last_error' => null,
         ]);
