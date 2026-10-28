@@ -65,18 +65,15 @@ class ReviewServerSecurity implements ShouldBeUnique, ShouldQueue
                 timeout: (int) config('security-scanner.ai.timeout'),
             );
 
-            // Some APIs, such as Ollama's, ignore the requested format, and a reply that isn't JSON reads as empty.
-            if (blank($response['summary'] ?? null)) {
-                throw new RuntimeException(trim("The model's reply wasn't the JSON the review asks for, so it couldn't be read. Try Review now, or a model that follows instructions more closely. It began: ".mb_strimwidth(trim($response->text), 0, 300, '…')));
-            }
+            $reply = $this->reply($response->structured, $response->text);
 
             AiReview::create([
                 'server_id' => $this->state->server_id,
                 'model' => (string) $settings->model(),
                 'reported_model' => $response->meta->model,
-                'summary' => mb_strimwidth(trim((string) ($response['summary'] ?? '')), 0, 2000, '…'),
-                'findings' => $this->findings($response['findings'] ?? []),
-                'checked' => $this->checked($response['checked'] ?? []),
+                'summary' => mb_strimwidth(trim((string) ($reply['summary'] ?? '')), 0, 2000, '…'),
+                'findings' => $this->findings($reply['findings'] ?? []),
+                'checked' => $this->checked($reply['checked'] ?? []),
                 'missing_sections' => PostureScript::missing($snapshot),
                 'input' => $input,
                 'input_tokens' => $response->usage->inputTokens ?: null,
@@ -113,6 +110,39 @@ class ReviewServerSecurity implements ShouldBeUnique, ShouldQueue
         }
 
         return $script->parse($result->output);
+    }
+
+    /**
+     * The model's answer. Some APIs, such as Ollama's, ignore the requested format, so when Laravel AI couldn't read
+     * the reply this reads the JSON object in it, allowing for text around it and raw line breaks in its strings.
+     *
+     * @param  array<string, mixed>  $structured
+     * @return array<string, mixed>
+     *
+     * @throws RuntimeException when the reply has no answer in it.
+     */
+    protected function reply(array $structured, string $text): array
+    {
+        if (filled($structured['summary'] ?? null)) {
+            return $structured;
+        }
+
+        $start = strpos($text, '{');
+        $end = strrpos($text, '}');
+
+        if ($start !== false && $end > $start) {
+            $json = substr($text, $start, $end - $start + 1);
+            $decoded = json_decode($json, true) ?? json_decode((string) preg_replace('/[\x00-\x1F]/', ' ', $json), true);
+
+            if (is_array($decoded) && filled($decoded['summary'] ?? null)) {
+                return $decoded;
+            }
+        }
+
+        $text = trim($text);
+        $excerpt = mb_strlen($text) > 600 ? mb_substr($text, 0, 300).' … '.mb_substr($text, -300) : $text;
+
+        throw new RuntimeException("The model's reply wasn't the JSON the review asks for, so it couldn't be read. Try Review now, or a model that follows instructions more closely. The reply was: ".($excerpt === '' ? '(empty)' : $excerpt));
     }
 
     /**

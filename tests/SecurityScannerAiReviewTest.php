@@ -243,6 +243,31 @@ test('reviews go to the configured OpenAI compatible API with its key and model,
         ->and($review->output_tokens)->toBe(5);
 });
 
+test('a reply with text around its JSON, or line breaks inside its strings, is still read', function () {
+    configureAiReview(['url' => 'https://llm.internal.test/v1/']);
+    $state = aiState(Server::factory()->create());
+
+    Http::fake(['llm.internal.test/*' => Http::response([
+        'id' => 'chatcmpl-1',
+        'object' => 'chat.completion',
+        'model' => 'review-model',
+        'choices' => [[
+            'index' => 0,
+            'finish_reason' => 'stop',
+            'message' => ['role' => 'assistant', 'content' => "Here is the review:\n{\"summary\": \"SSH accepts passwords.\nFail2ban is running.\", \"checked\": [{\"area\": \"SSH settings\", \"observation\": \"Passwords on.\"}], \"findings\": []}\nLet me know if you need more."],
+        ]],
+        'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 5, 'total_tokens' => 15],
+    ])]);
+
+    (new ReviewServerSecurity($state->fresh()))->handle(postureServer(), app(AiSettings::class), app(ReviewContext::class));
+
+    $review = AiReview::sole();
+
+    expect($state->fresh()->ai_error)->toBeNull()
+        ->and($review->summary)->toBe('SSH accepts passwords. Fail2ban is running.')
+        ->and($review->checked)->toBe([['area' => 'SSH settings', 'observation' => 'Passwords on.']]);
+});
+
 test('a reply that is not the JSON asked for fails the review instead of saving an empty one', function () {
     configureAiReview(['url' => 'https://llm.internal.test/v1/']);
     $state = aiState(Server::factory()->create());
