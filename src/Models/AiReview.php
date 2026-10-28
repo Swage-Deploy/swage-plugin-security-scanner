@@ -10,16 +10,22 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Swage\SecurityScanner\Ai\PostureScript;
 use Swage\SecurityScanner\Enums\AlertSeverity;
 
 /**
  * What an AI model made of a server's security: a summary and findings, each with a suggestion for a person to act
  * on. Reviews are only ever read: nothing in them is run.
  *
+ * Each review keeps what it was sent, what the model says it checked and how many tokens it used, so people can
+ * confirm that a review which found nothing really read the server.
+ *
  * @property list<array{severity: string, title: string, detail: string, suggestion: string}> $findings
+ * @property list<array{area: string, observation: string}>|null $checked
+ * @property list<string>|null $missing_sections
  */
 #[Table('security_scanner_ai_reviews')]
-#[Fillable(['server_id', 'model', 'summary', 'findings', 'requested_by_id'])]
+#[Fillable(['server_id', 'model', 'reported_model', 'summary', 'findings', 'checked', 'missing_sections', 'input', 'input_tokens', 'output_tokens', 'requested_by_id'])]
 class AiReview extends Model
 {
     use MassPrunable;
@@ -33,6 +39,10 @@ class AiReview extends Model
     {
         return [
             'findings' => 'array',
+            'checked' => 'array',
+            'missing_sections' => 'array',
+            'input_tokens' => 'integer',
+            'output_tokens' => 'integer',
         ];
     }
 
@@ -50,6 +60,16 @@ class AiReview extends Model
     public function requestedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'requested_by_id');
+    }
+
+    /**
+     * What the snapshot could not read, by the names the review gives them.
+     *
+     * @return list<string>
+     */
+    public function missingLabels(): array
+    {
+        return array_values(array_map(fn (string $section): string => PostureScript::SECTIONS[$section] ?? $section, $this->missing_sections ?? []));
     }
 
     /**

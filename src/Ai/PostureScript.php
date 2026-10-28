@@ -58,50 +58,74 @@ final readonly class PostureScript
         marker={$marker}
         section() { printf '\\n%s %s\\n' "\$marker" "\$*"; }
 
+        # Sections say "unavailable" when their command failed or isn't installed, and "none" when it ran and found
+        # nothing, so the review can tell a clean server from one it couldn't read.
+        or_none() { local out; out=\$(cat); if [ -n "\$out" ]; then printf '%s\\n' "\$out"; else echo none; fi; }
+
         section os
-        sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"'
-        uname -r
-        uptime -p 2>/dev/null
+        { sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"'; uname -r; uptime -p 2>/dev/null; } | or_none
 
         section reboot-required
         if [ -f /var/run/reboot-required ]; then echo yes; cat /var/run/reboot-required.pkgs 2>/dev/null; else echo no; fi
 
         section updates
-        apt list --upgradable 2>/dev/null | grep -v '^Listing' | head -n 200
+        if out=\$(apt list --upgradable 2>/dev/null); then printf '%s\\n' "\$out" | grep -v '^Listing' | head -n 200 | or_none; else echo unavailable; fi
 
         section auto-updates
-        systemctl is-enabled unattended-upgrades 2>/dev/null
-        cat /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null
+        if command -v systemctl > /dev/null; then
+            echo "unattended-upgrades \$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo not-installed)"
+            cat /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null
+        else
+            echo unavailable
+        fi
 
         section sshd
-        sshd -T 2>/dev/null | grep -Ei '^(port|listenaddress|permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|permitemptypasswords|authenticationmethods|maxauthtries|logingracetime|x11forwarding|allowtcpforwarding|allowagentforwarding|permittunnel|allowusers|allowgroups|denyusers|denygroups|clientaliveinterval|clientalivecountmax) '
+        if out=\$(sshd -T 2>/dev/null); then
+            printf '%s\\n' "\$out" | grep -Ei '^(port|listenaddress|permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|permitemptypasswords|authenticationmethods|maxauthtries|logingracetime|x11forwarding|allowtcpforwarding|allowagentforwarding|permittunnel|allowusers|allowgroups|denyusers|denygroups|clientaliveinterval|clientalivecountmax) ' | or_none
+        else
+            echo unavailable
+        fi
 
         section listening
-        ss -H -tulpn 2>/dev/null | awk '{print \$1, \$5, \$7}'
+        if out=\$(ss -H -tulpn 2>/dev/null); then printf '%s\\n' "\$out" | awk '{print \$1, \$5, \$7}' | or_none; else echo unavailable; fi
 
         section firewall
-        ufw status verbose 2>/dev/null
+        if ! command -v ufw > /dev/null; then echo 'not installed'; elif out=\$(ufw status verbose 2>/dev/null); then printf '%s\\n' "\$out" | or_none; else echo unavailable; fi
 
         section accounts
-        awk -F: '\$3 == 0 || (\$3 >= 1000 && \$7 !~ /(nologin|false)\$/) { print \$1, "uid=" \$3, \$7 }' /etc/passwd
+        awk -F: '\$3 == 0 || (\$3 >= 1000 && \$7 !~ /(nologin|false)\$/) { print \$1, "uid=" \$3, \$7 }' /etc/passwd | or_none
 
         section authorized-keys
         while IFS=: read -r name _ uid _ _ home _; do
             f="\$home/.ssh/authorized_keys"
             [ -f "\$f" ] && echo "\$name \$(grep -cvE '^[[:space:]]*(#|\$)' "\$f" 2>/dev/null) keys"
-        done < /etc/passwd
+        done < /etc/passwd | or_none
 
         section sudo
-        grep -rhE '^[^#]*NOPASSWD' /etc/sudoers /etc/sudoers.d 2>/dev/null | head -n 50
+        grep -rhE '^[^#]*NOPASSWD' /etc/sudoers /etc/sudoers.d 2>/dev/null | head -n 50 | or_none
 
         section failed-units
-        systemctl --failed --no-legend --plain 2>/dev/null | head -n 50
+        if command -v systemctl > /dev/null; then systemctl --failed --no-legend --plain 2>/dev/null | head -n 50 | or_none; else echo unavailable; fi
 
         section logins
-        last -n 20 -i -w 2>/dev/null | grep -vE '^(\$|wtmp)'
+        if command -v last > /dev/null; then last -n 20 -i -w 2>/dev/null | grep -vE '^(\$|wtmp)' | or_none; else echo unavailable; fi
 
         section end
         BASH;
+    }
+
+    /**
+     * The sections a snapshot lacks, or whose command failed or isn't installed, so the review could not see them.
+     *
+     * @param  array<string, string>  $sections
+     * @return list<string>
+     */
+    public static function missing(array $sections): array
+    {
+        return array_values(array_filter(
+            array_keys(self::SECTIONS),
+            fn (string $section): bool => in_array(trim($sections[$section] ?? ''), ['', 'unavailable'], true),
+        ));
     }
 
     /**

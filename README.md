@@ -124,6 +124,17 @@ That includes IP addresses and account names, so only use an API you trust with 
 
 The panel shows the latest review: a short summary, then each finding with its severity, what was seen and a suggestion. Suggestions can include shell commands. They come from a model and can be wrong, so check them before acting. Usernames and paths in the logs can be chosen by attackers, and the model is told to treat everything it's given as data, not instructions.
 
+### Checking a review read the server
+
+A review that finds nothing should still show that it looked. Each review shows:
+
+- **Checked**: what the model says it looked at, one line per part of the snapshot and of the scanner's records, with what it saw, such as "SSH settings: password logins off, root login key only". The model is told to list these even when nothing needs attention. If a review has none, the panel says there's no sign it read the server.
+- **The model and tokens**: the model you set, the model the API reports it used if that's different, and how many tokens it read and wrote. A review of a busy server that read only a few hundred tokens didn't get much.
+- **Parts that couldn't be read**: each part of the snapshot says when its command failed or isn't installed, as opposed to running and finding nothing. If any couldn't be read, the panel lists them, since anything wrong there wasn't checked.
+- **What was sent**: the exact data the model was given, for people who can manage the server. It includes the server's accounts and sudo rules, so viewers don't see it.
+
+To test a model before trusting a clean review, set up something it should flag on a test server, such as a service listening on a public port or `PermitRootLogin yes`, and click **Review now**.
+
 A review that fails shows its error in the panel, and isn't tried again until the next review is due. Reviews are kept for 30 days and aren't recorded in the server's activity log.
 
 ## Configuration

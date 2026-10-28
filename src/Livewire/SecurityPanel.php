@@ -14,6 +14,7 @@ use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Swage\SecurityScanner\Ai\AiSettings;
@@ -49,6 +50,12 @@ class SecurityPanel extends Component
     public bool $enabled = false;
 
     public bool $aiEnabled = false;
+
+    /**
+     * The data the latest AI review was sent, while it is being viewed.
+     */
+    #[Locked]
+    public ?string $reviewInput = null;
 
     public string $ip = '';
 
@@ -126,10 +133,29 @@ class SecurityPanel extends Component
         return app(AiSettings::class);
     }
 
+    /**
+     * The latest AI review, without the data it was sent, which is only loaded when someone asks to see it.
+     */
     #[Computed]
     public function latestReview(): ?AiReview
     {
-        return AiReview::query()->where('server_id', $this->server->id)->latest()->latest('id')->first();
+        return AiReview::query()->where('server_id', $this->server->id)->latest()->latest('id')
+            ->first(['id', 'server_id', 'model', 'reported_model', 'summary', 'findings', 'checked', 'missing_sections', 'input_tokens', 'output_tokens', 'requested_by_id', 'created_at']);
+    }
+
+    /**
+     * Show the data the latest review was sent. It includes the server's accounts and sudo rules, so only people who
+     * can manage the server see it.
+     */
+    public function showReviewInput(): void
+    {
+        $this->authorize('update', $this->server);
+
+        $this->reviewInput = $this->latestReview
+            ? (string) AiReview::query()->whereKey($this->latestReview->id)->value('input')
+            : null;
+
+        Flux::modal('security-scanner-review-input')->show();
     }
 
     public function scan(): void

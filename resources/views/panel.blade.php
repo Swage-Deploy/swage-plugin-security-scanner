@@ -211,8 +211,41 @@
             @if ($review = $this->latestReview)
                 <div class="flex flex-col gap-1">
                     <flux:text class="text-zinc-800 dark:text-zinc-200">{{ $review->summary }}</flux:text>
-                    <flux:text class="text-xs">{{ __('Reviewed :time by :model.', ['time' => $review->created_at->diffForHumans(), 'model' => $review->model]) }}</flux:text>
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <flux:text class="text-xs">
+                            {{ __('Reviewed :time by :model.', ['time' => $review->created_at->diffForHumans(), 'model' => $review->reported_model && $review->reported_model !== $review->model ? "{$review->model} ({$review->reported_model})" : $review->model]) }}
+                            @if ($review->input_tokens)
+                                {{ __('Read :input tokens and wrote :output.', ['input' => number_format($review->input_tokens), 'output' => number_format((int) $review->output_tokens)]) }}
+                            @endif
+                        </flux:text>
+                        @if ($canManage)
+                            <flux:button size="xs" variant="ghost" icon="document-magnifying-glass" wire:click="showReviewInput">{{ __('What was sent') }}</flux:button>
+                        @endif
+                    </div>
                 </div>
+
+                @if ($review->missingLabels() !== [])
+                    <flux:callout icon="exclamation-triangle" color="amber">
+                        <flux:callout.heading>{{ __('Parts of the server couldn\'t be read') }}</flux:callout.heading>
+                        <flux:callout.text>{{ __('The review didn\'t see: :parts. A command failed or isn\'t installed, so anything wrong there wasn\'t checked.', ['parts' => implode(', ', $review->missingLabels())]) }}</flux:callout.text>
+                    </flux:callout>
+                @endif
+
+                @if (filled($review->checked))
+                    <div>
+                        <flux:text class="text-xs font-medium uppercase tracking-wide">{{ __('Checked') }}</flux:text>
+                        <dl class="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(0,12rem)_1fr]">
+                            @foreach ($review->checked as $entry)
+                                <dt class="font-medium text-zinc-800 dark:text-zinc-200" wire:key="checked-{{ $review->id }}-{{ $loop->index }}">{{ $entry['area'] }}</dt>
+                                <dd class="mb-1 text-zinc-600 sm:mb-0 dark:text-zinc-400">{{ $entry['observation'] }}</dd>
+                            @endforeach
+                        </dl>
+                    </div>
+                @else
+                    <flux:callout icon="question-mark-circle" color="amber">
+                        <flux:callout.text>{{ __('The model didn\'t say what it checked, so there\'s no sign it read the server. Try Review now, or a model that follows instructions more closely.') }}</flux:callout.text>
+                    </flux:callout>
+                @endif
 
                 @if ($review->findings === [])
                     <flux:text>{{ __('Nothing needs attention.') }}</flux:text>
@@ -241,6 +274,16 @@
             @endif
         </div>
     </x-panel>
+
+    <flux:modal name="security-scanner-review-input" class="w-full max-w-4xl">
+        <div class="flex flex-col gap-4">
+            <div>
+                <flux:heading size="lg">{{ __('What the review was sent') }}</flux:heading>
+                <flux:text class="mt-1">{{ __('Everything the AI model was given for the latest review, exactly as it was sent, after its instructions.') }}</flux:text>
+            </div>
+            <pre class="max-h-[60vh] overflow-auto rounded-lg bg-zinc-50 p-4 font-mono text-xs whitespace-pre-wrap break-words text-zinc-800 dark:bg-white/5 dark:text-zinc-200">{{ $reviewInput ?: __('This review was made before Swage kept what reviews were sent.') }}</pre>
+        </div>
+    </flux:modal>
 
     <flux:modal name="security-scanner-block" class="w-full max-w-lg">
         <form wire:submit="block" class="flex flex-col gap-6">

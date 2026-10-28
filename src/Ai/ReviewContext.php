@@ -30,7 +30,25 @@ class ReviewContext
      */
     public function prompt(ScannerState $state, array $snapshot): string
     {
-        return "Review this server. The data is JSON.\n\n".json_encode($this->build($state, $snapshot), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        return static::wrap($this->encode($state, $snapshot));
+    }
+
+    /**
+     * The data the review is given, as the JSON sent, which is stored with the review so people can see what it saw.
+     *
+     * @param  array<string, string>  $snapshot
+     */
+    public function encode(ScannerState $state, array $snapshot): string
+    {
+        return json_encode($this->build($state, $snapshot), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * The prompt for the given data.
+     */
+    public static function wrap(string $json): string
+    {
+        return "Review this server. The data is JSON.\n\n".$json;
     }
 
     /**

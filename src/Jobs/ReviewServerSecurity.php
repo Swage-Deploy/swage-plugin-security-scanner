@@ -55,10 +55,11 @@ class ReviewServerSecurity implements ShouldBeUnique, ShouldQueue
         }
 
         try {
-            $prompt = $context->prompt($this->state, $this->snapshot($shell));
+            $snapshot = $this->snapshot($shell);
+            $input = $context->encode($this->state, $snapshot);
 
             $response = (new SecurityReviewer)->prompt(
-                $prompt,
+                ReviewContext::wrap($input),
                 provider: $settings->provider(),
                 model: $settings->model(),
                 timeout: (int) config('security-scanner.ai.timeout'),
@@ -67,8 +68,14 @@ class ReviewServerSecurity implements ShouldBeUnique, ShouldQueue
             AiReview::create([
                 'server_id' => $this->state->server_id,
                 'model' => (string) $settings->model(),
+                'reported_model' => $response->meta->model,
                 'summary' => mb_strimwidth(trim((string) ($response['summary'] ?? '')), 0, 2000, '…'),
                 'findings' => $this->findings($response['findings'] ?? []),
+                'checked' => $this->checked($response['checked'] ?? []),
+                'missing_sections' => PostureScript::missing($snapshot),
+                'input' => $input,
+                'input_tokens' => $response->usage->inputTokens ?: null,
+                'output_tokens' => $response->usage->outputTokens ?: null,
                 'requested_by_id' => $this->requestedBy?->id,
             ]);
 
@@ -101,6 +108,24 @@ class ReviewServerSecurity implements ShouldBeUnique, ShouldQueue
         }
 
         return $script->parse($result->output);
+    }
+
+    /**
+     * Keep the entries of what the review checked that say what was seen, cut to a sensible length.
+     *
+     * @return list<array{area: string, observation: string}>
+     */
+    protected function checked(mixed $checked): array
+    {
+        return collect(is_array($checked) ? $checked : [])
+            ->filter(fn (mixed $entry): bool => is_array($entry) && filled($entry['area'] ?? null) && filled($entry['observation'] ?? null))
+            ->take(SecurityReviewer::MAX_CHECKED)
+            ->map(fn (array $entry): array => [
+                'area' => mb_strimwidth(trim((string) $entry['area']), 0, 120, '…'),
+                'observation' => mb_strimwidth(trim((string) $entry['observation']), 0, 500, '…'),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

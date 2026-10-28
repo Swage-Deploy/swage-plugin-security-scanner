@@ -23,6 +23,11 @@ class SecurityReviewer implements Agent, HasStructuredOutput
      */
     public const int MAX_FINDINGS = 15;
 
+    /**
+     * The most entries kept from the list of what a review checked.
+     */
+    public const int MAX_CHECKED = 30;
+
     public function instructions(): string
     {
         $max = self::MAX_FINDINGS;
@@ -47,7 +52,12 @@ class SecurityReviewer implements Agent, HasStructuredOutput
 
         Don't report something as a problem when the data shows it is handled, such as addresses fail2ban has banned or
         that are blocked. Swage's own SSH logins are not counted, and Cloudflare's addresses are never counted or blocked.
-        If a snapshot section is missing or empty, the command was unavailable; don't guess what it would have shown.
+        A snapshot section of "none" means its command ran and found nothing. "unavailable", or a missing section, means
+        it could not be read: say so in what you checked, and don't guess what it would have shown.
+
+        Always list what you checked, even when nothing needs attention: one entry for each snapshot section and each part
+        of the scanner's records, saying briefly and specifically what you saw in it, such as "SSH: password logins off,
+        root login key only, port 22". This is how people confirm the review read the server.
 
         Report at most {$max} findings, most severe first, and none rather than filler when nothing needs attention.
         Use high for things to act on now, medium for things to fix soon, and low for hardening worth considering.
@@ -59,6 +69,10 @@ class SecurityReviewer implements Agent, HasStructuredOutput
     {
         return [
             'summary' => $schema->string()->description('Two or three sentences on the server\'s overall security, for the top of the review.')->required(),
+            'checked' => $schema->array()->items($schema->object([
+                'area' => $schema->string()->description('What was looked at, such as "SSH settings" or "Busiest hostile addresses".')->required(),
+                'observation' => $schema->string()->description('What was seen in it, specifically, in one sentence.')->required(),
+            ]))->description('Everything reviewed, one entry per snapshot section and part of the scanner\'s records, whether or not it led to a finding.')->required(),
             'findings' => $schema->array()->items($schema->object([
                 'severity' => $schema->string()->enum(array_column(AlertSeverity::cases(), 'value'))->required(),
                 'title' => $schema->string()->description('A short name for the finding.')->required(),
