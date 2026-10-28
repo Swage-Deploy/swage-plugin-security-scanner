@@ -64,6 +64,12 @@ class SecurityReviewer implements Agent, HasStructuredOutput
         of the scanner's records, saying briefly and specifically what you saw in it, such as "SSH: password logins off,
         root login key only, port 22". This is how people confirm the review read the server.
 
+        Give each finding a key: a short, lowercase name for the issue made of words and hyphens, such as
+        "ssh-password-login", that stays the same from one review to the next. People can ignore findings they have
+        decided to accept. Those are listed with their keys under ignored_findings. Still check those parts of the server
+        as usual, and still report an ignored issue when you see it, with its key and the severity you judge it to have:
+        Swage shows it apart from the other findings rather than hiding it.
+
         Report at most {$max} findings, most severe first, and none rather than filler when nothing needs attention.
         Use high for things to act on now, medium for things to fix soon, and low for hardening worth considering.
         Write plain, short sentences.
@@ -82,6 +88,7 @@ class SecurityReviewer implements Agent, HasStructuredOutput
                 'observation' => $schema->string()->description('What was seen in it, specifically, in one sentence.')->required(),
             ]))->description('Everything reviewed, one entry per snapshot section and part of the scanner\'s records, whether or not it led to a finding.')->required(),
             'findings' => $schema->array()->items($schema->object([
+                'key' => $schema->string()->description('A short, lowercase name for the issue, such as "ssh-password-login", the same in every review. Use an ignored finding\'s key when it is that issue.')->required(),
                 'severity' => $schema->string()->enum(array_column(AlertSeverity::cases(), 'value'))->required(),
                 'title' => $schema->string()->description('A short name for the finding.')->required(),
                 'detail' => $schema->string()->description('What was seen and why it matters.')->required(),

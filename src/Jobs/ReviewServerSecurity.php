@@ -14,6 +14,7 @@ use Swage\SecurityScanner\Ai\ReviewContext;
 use Swage\SecurityScanner\Ai\SecurityReviewer;
 use Swage\SecurityScanner\Enums\AlertSeverity;
 use Swage\SecurityScanner\Models\AiReview;
+use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Throwable;
 
@@ -166,7 +167,7 @@ class ReviewServerSecurity implements ShouldBeUnique, ShouldQueue
     /**
      * Keep the findings that have what the panel shows, cut to a sensible length.
      *
-     * @return list<array{severity: string, title: string, detail: string, suggestion: string}>
+     * @return list<array{key: string, severity: string, title: string, detail: string, suggestion: string}>
      */
     protected function findings(mixed $findings): array
     {
@@ -174,6 +175,7 @@ class ReviewServerSecurity implements ShouldBeUnique, ShouldQueue
             ->filter(fn (mixed $finding): bool => is_array($finding) && filled($finding['title'] ?? null))
             ->take(SecurityReviewer::MAX_FINDINGS)
             ->map(fn (array $finding): array => [
+                'key' => IgnoredFinding::keyFor($finding),
                 'severity' => (AlertSeverity::tryFrom((string) ($finding['severity'] ?? '')) ?? AlertSeverity::Low)->value,
                 'title' => mb_strimwidth(trim((string) $finding['title']), 0, 200, '…'),
                 'detail' => mb_strimwidth(trim((string) ($finding['detail'] ?? '')), 0, 2000, '…'),

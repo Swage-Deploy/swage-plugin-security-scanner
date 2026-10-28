@@ -231,15 +231,23 @@
                     </flux:callout>
                 @endif
 
-                @if ($review->findings === [])
-                    <flux:text>{{ __('Nothing needs attention.') }}</flux:text>
+                @php
+                    $ignoredKeys = $this->ignoredFindings->pluck('key')->all();
+                    [$ignoredNow, $findings] = collect($review->sortedFindings())->partition(fn ($finding) => in_array($finding['key'], $ignoredKeys, true));
+                @endphp
+
+                @if ($findings->isEmpty())
+                    <flux:text>{{ $ignoredNow->isEmpty() ? __('Nothing needs attention.') : __('Nothing needs attention apart from what\'s ignored.') }}</flux:text>
                 @else
                     <div class="flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-white/8 dark:border-white/8">
-                        @foreach ($review->sortedFindings() as $finding)
-                            <div class="flex flex-col gap-2 p-4" wire:key="finding-{{ $review->id }}-{{ $loop->index }}">
+                        @foreach ($findings as $finding)
+                            <div class="flex flex-col gap-2 p-4" wire:key="finding-{{ $review->id }}-{{ $finding['key'] }}">
                                 <div class="flex items-center gap-2">
                                     <flux:badge size="sm" :color="$finding['severity']->color()">{{ $finding['severity']->label() }}</flux:badge>
                                     <span class="font-medium text-zinc-900 dark:text-white">{{ $finding['title'] }}</span>
+                                    @if ($canManage)
+                                        <flux:button size="xs" variant="ghost" icon="eye-slash" class="ms-auto" wire:click="ignoreFinding('{{ $finding['key'] }}')">{{ __('Ignore') }}</flux:button>
+                                    @endif
                                 </div>
                                 <flux:text class="whitespace-pre-line">{{ $finding['detail'] }}</flux:text>
                                 @if (filled($finding['suggestion']))
@@ -252,6 +260,42 @@
                         @endforeach
                     </div>
                     <flux:text class="text-xs">{{ __('Suggestions come from an AI model and can be wrong. Check them before acting, and don\'t run a command you don\'t understand. Swage never runs them.') }}</flux:text>
+                @endif
+
+                @if ($this->ignoredFindings->isNotEmpty())
+                    <div>
+                        <flux:text class="text-xs font-medium uppercase tracking-wide">{{ __('Ignored') }}</flux:text>
+                        <flux:text class="mt-1 text-xs">{{ __('Reviews still check for these, but they aren\'t listed with the findings to act on.') }}</flux:text>
+                        <div class="mt-2 flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-white/8 dark:border-white/8">
+                            @foreach ($this->ignoredFindings as $ignored)
+                                @php($current = $ignoredNow->firstWhere('key', $ignored->key))
+                                <div class="flex flex-col gap-1 px-4 py-3" wire:key="ignored-{{ $ignored->id }}">
+                                    <div class="flex items-center gap-2">
+                                        @if ($current)
+                                            <flux:badge size="sm" :color="$current['severity']->color()">{{ $current['severity']->label() }}</flux:badge>
+                                        @endif
+                                        <span class="text-sm font-medium text-zinc-800 dark:text-zinc-200">{{ $current['title'] ?? $ignored->title }}</span>
+                                        @if ($canManage)
+                                            <flux:button size="xs" variant="ghost" icon="eye" class="ms-auto" wire:click="stopIgnoring({{ $ignored->id }})">{{ __('Stop ignoring') }}</flux:button>
+                                        @endif
+                                    </div>
+                                    <flux:text class="text-xs">
+                                        {{ $current ? __('Still reported by the latest review.') : __('Not reported by the latest review.') }}
+                                        {{ $ignored->ignoredBy ? __('Ignored by :name :time.', ['name' => $ignored->ignoredBy->name, 'time' => $ignored->created_at->diffForHumans()]) : __('Ignored :time.', ['time' => $ignored->created_at->diffForHumans()]) }}
+                                    </flux:text>
+                                    @if ($current)
+                                        <details class="text-sm">
+                                            <summary class="cursor-pointer text-xs text-zinc-500 dark:text-zinc-400">{{ __('What the review said') }}</summary>
+                                            <flux:text class="mt-2 whitespace-pre-line">{{ $current['detail'] }}</flux:text>
+                                            @if (filled($current['suggestion']))
+                                                <flux:text class="mt-2 whitespace-pre-line break-words">{{ $current['suggestion'] }}</flux:text>
+                                            @endif
+                                        </details>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
                 @endif
 
                 @if (filled($review->checked))

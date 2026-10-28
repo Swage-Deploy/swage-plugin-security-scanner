@@ -28,6 +28,7 @@ use Swage\SecurityScanner\Jobs\ScanServerLogs;
 use Swage\SecurityScanner\Jobs\UnblockAddress;
 use Swage\SecurityScanner\Models\AiReview;
 use Swage\SecurityScanner\Models\BlockedAddress;
+use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
@@ -156,6 +157,47 @@ class SecurityPanel extends Component
             : null;
 
         Flux::modal('security-scanner-review-input')->show();
+    }
+
+    /**
+     * The findings people have ignored on the server, newest first.
+     *
+     * @return Collection<int, IgnoredFinding>
+     */
+    #[Computed]
+    public function ignoredFindings(): Collection
+    {
+        return IgnoredFinding::query()->where('server_id', $this->server->id)->with('ignoredBy')->latest()->latest('id')->get();
+    }
+
+    /**
+     * Ignore one of the latest review's findings. Later reviews still check for it, and it shows under Ignored.
+     */
+    public function ignoreFinding(string $key): void
+    {
+        $this->authorize('update', $this->server);
+
+        $finding = collect($this->latestReview?->sortedFindings() ?? [])->firstWhere('key', $key);
+
+        abort_if($finding === null, 404);
+
+        IgnoredFinding::firstOrCreate(
+            ['server_id' => $this->server->id, 'key' => $key],
+            ['title' => mb_strimwidth($finding['title'], 0, 255, '…'), 'ignored_by_id' => auth()->id()],
+        );
+
+        unset($this->ignoredFindings);
+
+        Flux::toast(variant: 'success', text: __('Ignoring ":title". Reviews still check for it, and it shows under Ignored.', ['title' => $finding['title']]));
+    }
+
+    public function stopIgnoring(int $ignoredId): void
+    {
+        $this->authorize('update', $this->server);
+
+        IgnoredFinding::query()->where('server_id', $this->server->id)->findOrFail($ignoredId)->delete();
+
+        unset($this->ignoredFindings);
     }
 
     public function scan(): void

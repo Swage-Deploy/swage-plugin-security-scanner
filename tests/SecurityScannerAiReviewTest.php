@@ -28,6 +28,7 @@ use Swage\SecurityScanner\Enums\EventKind;
 use Swage\SecurityScanner\Jobs\ReviewServerSecurity;
 use Swage\SecurityScanner\Livewire\SecurityPanel;
 use Swage\SecurityScanner\Models\AiReview;
+use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
@@ -410,4 +411,62 @@ test('a review that doesn\'t say what it checked is flagged as unconfirmed', fun
     Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
         ->assertSee('All good.')
         ->assertSee('there\'s no sign it read the server');
+});
+
+test('an ignored finding moves under Ignored, and later reviews are told about it but still check for it', function () {
+    Queue::fake();
+    configureAiReview();
+    $server = Server::factory()->create();
+    aiState($server);
+
+    AiReview::create(['server_id' => $server->id, 'model' => 'review-model', 'summary' => 'Two things to look at.', 'checked' => [['area' => 'SSH settings', 'observation' => 'Port 22.']], 'findings' => [
+        ['key' => 'ssh-default-port', 'severity' => 'low', 'title' => 'SSH listens on port 22', 'detail' => 'Bots scan port 22.', 'suggestion' => 'Move SSH to another port.'],
+        ['key' => 'mysql-public', 'severity' => 'high', 'title' => 'MySQL listens publicly', 'detail' => 'Port 3306 is open.', 'suggestion' => 'Bind MySQL to 127.0.0.1.'],
+    ]]);
+
+    $viewer = User::factory()->create();
+    $server->members()->attach($viewer->id, ['role' => MemberRole::Viewer->value]);
+
+    Livewire::actingAs($viewer)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('SSH listens on port 22')
+        ->assertDontSee('Ignore')
+        ->call('ignoreFinding', 'ssh-default-port');
+
+    expect(IgnoredFinding::count())->toBe(0);
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->call('ignoreFinding', 'not-in-the-review')
+        ->assertNotFound();
+
+    $panel = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->call('ignoreFinding', 'ssh-default-port')
+        ->assertSeeInOrder(['MySQL listens publicly', 'Swage never runs them', 'Ignored', 'SSH listens on port 22', 'Stop ignoring', 'Still reported by the latest review.', 'Checked']);
+
+    $ignored = IgnoredFinding::sole();
+
+    expect($ignored->key)->toBe('ssh-default-port')
+        ->and($ignored->title)->toBe('SSH listens on port 22')
+        ->and($ignored->ignored_by_id)->toBe($server->user->id)
+        ->and(app(ReviewContext::class)->build(ScannerState::for($server), [])['ignored_findings'])->toBe([['key' => 'ssh-default-port', 'title' => 'SSH listens on port 22']])
+        ->and((new SecurityReviewer)->instructions())->toContain('Still check those parts of the server');
+
+    AiReview::create(['server_id' => $server->id, 'model' => 'review-model', 'summary' => 'Only the port.', 'checked' => [['area' => 'SSH settings', 'observation' => 'Port 22.']], 'findings' => [
+        ['key' => 'ssh-default-port', 'severity' => 'low', 'title' => 'SSH is on the default port', 'detail' => 'Bots scan port 22.', 'suggestion' => 'Move SSH to another port.'],
+    ]]);
+
+    $panel = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('Nothing needs attention apart from what')
+        ->assertSee('SSH is on the default port')
+        ->assertDontSee('Swage never runs them')
+        ->call('stopIgnoring', $ignored->id)
+        ->assertSee('Swage never runs them')
+        ->assertDontSee('Stop ignoring');
+
+    expect(IgnoredFinding::count())->toBe(0);
+});
+
+test('findings keep the key the review gives them, falling back to their title', function () {
+    expect(IgnoredFinding::keyFor(['key' => 'SSH Password Login', 'title' => 'Anything']))->toBe('ssh-password-login')
+        ->and(IgnoredFinding::keyFor(['title' => 'MySQL listens publicly']))->toBe('mysql-listens-publicly')
+        ->and(IgnoredFinding::keyFor(['key' => "'); alert(1); //", 'title' => 'x']))->toBe('alert1');
 });

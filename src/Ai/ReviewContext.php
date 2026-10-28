@@ -5,6 +5,7 @@ namespace Swage\SecurityScanner\Ai;
 use Illuminate\Support\Collection;
 use Swage\SecurityScanner\Enums\EventKind;
 use Swage\SecurityScanner\Models\BlockedAddress;
+use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
@@ -94,6 +95,8 @@ class ReviewContext
                 'could_ban_swage' => $state->fail2banCanBanPanel(),
                 'misses_probes' => $state->fail2banMissesProbes(),
             ],
+            'ignored_findings' => IgnoredFinding::query()->where('server_id', $serverId)->orderBy('key')->get()
+                ->map(fn (IgnoredFinding $finding): array => ['key' => $finding->key, 'title' => $finding->title])->all(),
             'snapshot' => collect(PostureScript::SECTIONS)
                 ->mapWithKeys(fn (string $label, string $section): array => [$label => $snapshot[$section] ?? null])
                 ->all(),

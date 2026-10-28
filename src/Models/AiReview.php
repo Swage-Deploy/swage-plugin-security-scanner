@@ -20,7 +20,7 @@ use Swage\SecurityScanner\Enums\AlertSeverity;
  * Each review keeps what it was sent, what the model says it checked and how many tokens it used, so people can
  * confirm that a review which found nothing really read the server.
  *
- * @property list<array{severity: string, title: string, detail: string, suggestion: string}> $findings
+ * @property list<array{key?: string, severity: string, title: string, detail: string, suggestion: string}> $findings
  * @property list<array{area: string, observation: string}>|null $checked
  * @property list<string>|null $missing_sections
  */
@@ -73,14 +73,14 @@ class AiReview extends Model
     }
 
     /**
-     * The findings, most severe first.
+     * The findings, most severe first, each with its key.
      *
-     * @return list<array{severity: AlertSeverity, title: string, detail: string, suggestion: string}>
+     * @return list<array{key: string, severity: AlertSeverity, title: string, detail: string, suggestion: string}>
      */
     public function sortedFindings(): array
     {
         return collect($this->findings)
-            ->map(fn (array $finding): array => [...$finding, 'severity' => AlertSeverity::tryFrom($finding['severity']) ?? AlertSeverity::Low])
+            ->map(fn (array $finding): array => [...$finding, 'key' => IgnoredFinding::keyFor($finding), 'severity' => AlertSeverity::tryFrom($finding['severity']) ?? AlertSeverity::Low])
             ->sortByDesc(fn (array $finding): int => $finding['severity']->rank())
             ->values()
             ->all();

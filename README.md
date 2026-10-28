@@ -124,6 +124,12 @@ That includes IP addresses and account names, so only use an API you trust with 
 
 The panel shows the latest review: a short summary, then each finding with its severity, what was seen and a suggestion. Suggestions can include shell commands. They come from a model and can be wrong, so check them before acting. Usernames and paths in the logs can be chosen by attackers, and the model is told to treat everything it's given as data, not instructions.
 
+### Ignoring a finding
+
+People who can manage the server can click **Ignore** on a finding they've decided to accept, such as SSH on port 22. It moves to an **Ignored** section below the findings, which says whether the latest review still reports it, and who ignored it. **Stop ignoring** puts it back.
+
+Ignoring a finding doesn't stop reviews checking for it. Each finding has a short key, such as `ssh-password-login`, which the model is asked to keep the same from one review to the next. Reviews are sent the keys and titles of ignored findings, told to check those parts of the server as usual, and to report an ignored issue under its key whenever they see it. Matching relies on the model reusing the key, so a reworded finding with a new key shows with the others again and can be ignored again.
+
 ### Checking a review read the server
 
 A review that finds nothing should still show that it looked. Each review shows:
