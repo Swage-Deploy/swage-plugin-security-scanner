@@ -231,22 +231,6 @@
                     </flux:callout>
                 @endif
 
-                @if (filled($review->checked))
-                    <div>
-                        <flux:text class="text-xs font-medium uppercase tracking-wide">{{ __('Checked') }}</flux:text>
-                        <dl class="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(0,12rem)_1fr]">
-                            @foreach ($review->checked as $entry)
-                                <dt class="font-medium text-zinc-800 dark:text-zinc-200" wire:key="checked-{{ $review->id }}-{{ $loop->index }}">{{ $entry['area'] }}</dt>
-                                <dd class="mb-1 text-zinc-600 sm:mb-0 dark:text-zinc-400">{{ $entry['observation'] }}</dd>
-                            @endforeach
-                        </dl>
-                    </div>
-                @else
-                    <flux:callout icon="question-mark-circle" color="amber">
-                        <flux:callout.text>{{ __('The model didn\'t say what it checked, so there\'s no sign it read the server. Try Review now, or a model that follows instructions more closely.') }}</flux:callout.text>
-                    </flux:callout>
-                @endif
-
                 @if ($review->findings === [])
                     <flux:text>{{ __('Nothing needs attention.') }}</flux:text>
                 @else
@@ -268,6 +252,22 @@
                         @endforeach
                     </div>
                     <flux:text class="text-xs">{{ __('Suggestions come from an AI model and can be wrong. Check them before acting, and don\'t run a command you don\'t understand. Swage never runs them.') }}</flux:text>
+                @endif
+
+                @if (filled($review->checked))
+                    <div>
+                        <flux:text class="text-xs font-medium uppercase tracking-wide">{{ __('Checked') }}</flux:text>
+                        <dl class="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(0,12rem)_1fr]">
+                            @foreach ($review->checked as $entry)
+                                <dt class="font-medium text-zinc-800 dark:text-zinc-200" wire:key="checked-{{ $review->id }}-{{ $loop->index }}">{{ $entry['area'] }}</dt>
+                                <dd class="mb-1 text-zinc-600 sm:mb-0 dark:text-zinc-400">{{ $entry['observation'] }}</dd>
+                            @endforeach
+                        </dl>
+                    </div>
+                @else
+                    <flux:callout icon="question-mark-circle" color="amber">
+                        <flux:callout.text>{{ __('The model didn\'t say what it checked, so there\'s no sign it read the server. Try Review now, or a model that follows instructions more closely.') }}</flux:callout.text>
+                    </flux:callout>
                 @endif
             @elseif ($aiEnabled)
                 <flux:text>{{ __('Waiting for the first review.') }}</flux:text>
