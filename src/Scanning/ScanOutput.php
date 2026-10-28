@@ -47,6 +47,11 @@ final class ScanOutput
     public ?bool $fail2banIgnoresPanel = null;
 
     /**
+     * Whether fail2ban's recidive jail reads the log fail2ban writes its bans to, or null when it could not say.
+     */
+    public ?bool $fail2banRecidiveReadsLog = null;
+
+    /**
      * The addresses in nginx's deny list, or null when the server does not run nginx.
      *
      * @var list<string>|null

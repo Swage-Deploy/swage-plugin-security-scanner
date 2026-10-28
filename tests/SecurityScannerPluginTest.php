@@ -351,6 +351,32 @@ test('servers whose fail2ban could ban swage\'s own address are offered an updat
         ->and(ScannerState::for($server)->needsFail2banUpdate())->toBeFalse();
 });
 
+test('servers whose recidive jail can\'t see fail2ban\'s bans are offered an update', function () {
+    $server = Server::factory()->create();
+
+    scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel yes\nrecidive-reads-log no\n203.0.113.9");
+    $state = scan($server);
+
+    expect($state)
+        ->fail2ban_recidive_reads_log->toBeFalse()
+        ->fail2ban_banned->toBe(['203.0.113.9'])
+        ->and($state->needsFail2banUpdate())->toBeTrue();
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('fail2ban never bans addresses for a week')
+        ->assertSee('Update fail2ban');
+
+    scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel yes\nrecidive-reads-log yes\n203.0.113.9");
+
+    expect(scan($server))
+        ->fail2ban_recidive_reads_log->toBeTrue()
+        ->and(ScannerState::for($server)->needsFail2banUpdate())->toBeFalse();
+});
+
+test('the scan script asks whether fail2ban\'s recidive jail reads its log', function () {
+    expect((new ScanScript('@@M'))->render([]))->toContain("fail2ban-client status recidive 2>/dev/null | grep -q 'File list' && echo 'recidive-reads-log yes' || echo 'recidive-reads-log no'");
+});
+
 test('the scan script asks whether fail2ban leaves swage\'s address alone', function () {
     expect((new ScanScript('@@M'))->render([]))->toContain("grep -qs '^ignoreip = ' /etc/fail2ban/jail.d/swage.conf && echo 'ignores-panel yes' || echo 'ignores-panel no'");
 });
@@ -537,6 +563,7 @@ test('fail2ban is installed with the server\'s ssh port', function () {
 
     $shell->assertRan('apt-get install -yq -o DPkg::Lock::Timeout=300 fail2ban');
     $shell->assertRan("[sshd]\nenabled = true\nport = 2222");
+    $shell->assertRan("[recidive]\nenabled = true\nbackend = auto\nbantime = 1w");
     $shell->assertRan("[swage-probes]\nenabled = true\nport = http,https\nfilter = swage-probes\nlogpath = /var/log/nginx/*access.log\nbackend = auto\nfindtime = 1h\nmaxretry = 20\n");
     $shell->assertRan('prefregex = ^<HOST> \S+ \S+ \[\] "[A-Z]+ <F-CONTENT>[^ "]+</F-CONTENT>');
     $shell->assertRan("failregex = (?i:/\.(env|git|svn|hg|aws|ssh|docker|vscode|idea|DS_Store|htpasswd|htaccess))\n            (?i:/wp-");
@@ -549,7 +576,8 @@ test('fail2ban is installed with the server\'s ssh port', function () {
     $shell->assertRan('file = /etc/nginx/conf.d/swage-fail2ban-<name>.conf');
     expect(ScannerState::for($server))
         ->fail2ban_installed->toBeTrue()
-        ->fail2ban_ignores_panel->toBeTrue();
+        ->fail2ban_ignores_panel->toBeTrue()
+        ->fail2ban_recidive_reads_log->toBeTrue();
 });
 
 test('fail2ban never bans the address swage connects from', function () {

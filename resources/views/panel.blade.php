@@ -149,6 +149,9 @@
                     @if ($this->state->fail2banCanBanPanel())
                         <flux:callout.heading>{{ __('fail2ban could lock Swage out of this server') }}</flux:callout.heading>
                         <flux:callout.text>{{ __('It was installed before it left Swage\'s own address alone, so a few failed logins or probes from that address would ban Swage. Update it to exempt the address.') }}</flux:callout.text>
+                    @elseif ($this->state->fail2banMissesRepeatOffenders())
+                        <flux:callout.heading>{{ __('fail2ban never bans addresses for a week') }}</flux:callout.heading>
+                        <flux:callout.text>{{ __('Its recidive jail can\'t see fail2ban\'s bans, so addresses banned for an hour come back as soon as the ban ends. Update it to ban them for a week after three bans in a day.') }}</flux:callout.text>
                     @else
                         <flux:callout.heading>{{ __('fail2ban doesn\'t ban probing yet') }}</flux:callout.heading>
                         <flux:callout.text>{{ __('It was installed before the scanner could ban addresses probing sites. Update it to add the probes jail.') }}</flux:callout.text>

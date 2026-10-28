@@ -91,8 +91,10 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         enabled = true
         port = {$port}
 
+        # recidive reads the bans fail2ban writes to its own log file, which isn't in the journal.
         [recidive]
         enabled = true
+        backend = auto
         bantime = 1w
         findtime = 1d
         maxretry = 3
@@ -121,7 +123,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         echo "fail2ban is installed."
         BASH);
 
-        ScannerState::for($this->server)->update(['fail2ban_installed' => true, 'fail2ban_ignores_panel' => true]);
+        ScannerState::for($this->server)->update(['fail2ban_installed' => true, 'fail2ban_ignores_panel' => true, 'fail2ban_recidive_reads_log' => true]);
     }
 
     /**

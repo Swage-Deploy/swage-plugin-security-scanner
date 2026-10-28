@@ -85,6 +85,8 @@ final readonly class ScanScript
             echo "jails \$(fail2ban-client status 2>/dev/null | sed -n 's/.*Jail list:[[:space:]]*//p')"
             # Jails installed before Swage's address was left alone have no ignoreip of their own.
             grep -qs '^ignoreip = ' /etc/fail2ban/jail.d/swage.conf && echo 'ignores-panel yes' || echo 'ignores-panel no'
+            # Jails installed before recidive read fail2ban's log read the journal, where its bans never appear.
+            fail2ban-client status recidive 2>/dev/null | grep -q 'File list' && echo 'recidive-reads-log yes' || echo 'recidive-reads-log no'
             for jail in sshd recidive {$probesJail}; do
                 fail2ban-client status "\$jail" 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p'
             done
@@ -196,6 +198,11 @@ final readonly class ScanScript
         if (preg_match('/^ignores-panel (yes|no)$/m', $rest, $ignores)) {
             $result->fail2banIgnoresPanel = $ignores[1] === 'yes';
             $rest = str_replace($ignores[0], '', $rest);
+        }
+
+        if (preg_match('/^recidive-reads-log (yes|no)$/m', $rest, $recidive)) {
+            $result->fail2banRecidiveReadsLog = $recidive[1] === 'yes';
+            $rest = str_replace($recidive[0], '', $rest);
         }
 
         if (preg_match('/^jails ?(.*)$/m', $rest, $jails)) {
