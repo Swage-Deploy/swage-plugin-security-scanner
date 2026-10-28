@@ -5,6 +5,7 @@ namespace Swage\SecurityScanner;
 use App\Models\Server;
 use App\Plugins\HasPluginTab;
 use App\Servers\ServerIntegration;
+use Swage\SecurityScanner\Ai\AiSettings;
 
 class SecurityScannerIntegration implements HasPluginTab, ServerIntegration
 {
@@ -29,10 +30,10 @@ class SecurityScannerIntegration implements HasPluginTab, ServerIntegration
     }
 
     /**
-     * The scanner stores no secrets of its own.
+     * The AI review's API key is the only secret the scanner stores. It is never sent to servers.
      */
     public function secrets(Server $server): array
     {
-        return [];
+        return array_values(array_filter([app(AiSettings::class)->apiKey()]));
     }
 }

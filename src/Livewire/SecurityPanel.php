@@ -16,13 +16,16 @@ use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithPagination;
+use Swage\SecurityScanner\Ai\AiSettings;
 use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Enums\AlertSeverity;
 use Swage\SecurityScanner\Enums\EventKind;
 use Swage\SecurityScanner\Jobs\BlockAddress;
 use Swage\SecurityScanner\Jobs\InstallFail2ban;
+use Swage\SecurityScanner\Jobs\ReviewServerSecurity;
 use Swage\SecurityScanner\Jobs\ScanServerLogs;
 use Swage\SecurityScanner\Jobs\UnblockAddress;
+use Swage\SecurityScanner\Models\AiReview;
 use Swage\SecurityScanner\Models\BlockedAddress;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
@@ -30,7 +33,7 @@ use Swage\SecurityScanner\Models\SecurityEvent;
 
 /**
  * The security scanner's panel on a server's Plugins tab: whether scanning is on, open SSH login alerts, the busiest
- * hostile addresses of the last day, the addresses blocked in the firewall, and fail2ban.
+ * hostile addresses of the last day, the addresses blocked in the firewall, fail2ban, and the AI review.
  */
 class SecurityPanel extends Component
 {
@@ -45,6 +48,8 @@ class SecurityPanel extends Component
 
     public bool $enabled = false;
 
+    public bool $aiEnabled = false;
+
     public string $ip = '';
 
     public string $reason = '';
@@ -54,6 +59,7 @@ class SecurityPanel extends Component
         $this->authorize('view', $this->server);
 
         $this->enabled = $this->state->enabled;
+        $this->aiEnabled = $this->state->ai_enabled;
     }
 
     #[Computed]
@@ -75,6 +81,55 @@ class SecurityPanel extends Component
         Flux::toast(variant: 'success', text: $this->enabled
             ? __('Scanning this server\'s logs. The first scan reads the last few minutes of SSH logins and the end of each access log.')
             : __('Stopped scanning this server\'s logs.'));
+    }
+
+    /**
+     * Turn the AI review on or off for the server. Turning it on reviews the server straight away.
+     *
+     * @throws ValidationException
+     */
+    public function updatedAiEnabled(): void
+    {
+        $this->authorize('update', $this->server);
+
+        if ($this->aiEnabled && ! $this->ai->isConfigured()) {
+            $this->aiEnabled = false;
+
+            throw ValidationException::withMessages(['aiEnabled' => __('An administrator needs to set the AI review\'s API URL and model first.')]);
+        }
+
+        $this->state->update(['ai_enabled' => $this->aiEnabled]);
+
+        if ($this->aiEnabled) {
+            ReviewServerSecurity::dispatch($this->state, auth()->user());
+        }
+
+        Flux::toast(variant: 'success', text: $this->aiEnabled
+            ? __('Reviewing this server with AI. The first review shows here in a minute or two.')
+            : __('Stopped reviewing this server with AI. Earlier reviews are kept.'));
+    }
+
+    public function review(): void
+    {
+        $this->authorize('update', $this->server);
+
+        abort_unless($this->state->ai_enabled && $this->ai->isConfigured(), 403);
+
+        ReviewServerSecurity::dispatch($this->state, auth()->user());
+
+        Flux::toast(variant: 'success', text: __('Reviewing this server with AI.'));
+    }
+
+    #[Computed]
+    public function ai(): AiSettings
+    {
+        return app(AiSettings::class);
+    }
+
+    #[Computed]
+    public function latestReview(): ?AiReview
+    {
+        return AiReview::query()->where('server_id', $this->server->id)->latest()->latest('id')->first();
     }
 
     public function scan(): void

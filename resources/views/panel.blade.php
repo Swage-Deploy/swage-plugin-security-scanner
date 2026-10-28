@@ -6,7 +6,7 @@
     $sshAttempts = collect(EventKind::sshAttempts())->sum(fn ($kind) => $totals[$kind->value] ?? 0);
 @endphp
 
-<div class="flex flex-col gap-6" @if ($enabled || $this->blocked->contains(fn ($address) => $address->status->isBusy())) wire:poll.15s @endif>
+<div class="flex flex-col gap-6" @if ($enabled || $aiEnabled || $this->blocked->contains(fn ($address) => $address->status->isBusy())) wire:poll.15s @endif>
     <x-panel icon="shield-check" :heading="__('Security scanner')" :description="__('Reads this server\'s SSH, sudo and nginx logs every few minutes for brute force attempts and probing.')">
         <x-slot:actions>
             @if ($enabled && $canManage)
@@ -172,6 +172,74 @@
                 <flux:button size="sm" icon="arrow-down-tray" class="mt-4" wire:click="installFail2ban">{{ __('Install fail2ban') }}</flux:button>
             @endif
         @endif
+    </x-panel>
+
+    <x-panel icon="sparkles" :heading="__('AI review')" :description="__('An AI model reads what the scanner recorded and a read-only snapshot of how this server is set up, and suggests what to look at. It can\'t change anything: its suggestions are only shown here for you to act on.')">
+        @if ($aiEnabled && $canManage && $this->ai->isConfigured())
+            <x-slot:actions>
+                <flux:button size="sm" variant="ghost" icon="arrow-path" wire:click="review">{{ __('Review now') }}</flux:button>
+            </x-slot:actions>
+        @endif
+
+        <div class="flex flex-col gap-4">
+            @if (! $this->ai::supported())
+                <flux:text>{{ __('The AI review needs Swage v1.3.0 or later.') }}</flux:text>
+            @elseif (! $this->ai->isConfigured())
+                <flux:callout icon="cog-6-tooth" color="zinc">
+                    <flux:callout.text>{{ __('Set the OpenAI compatible API to use, and its model, on the plugin\'s config page first.') }}</flux:callout.text>
+                    @can('administer')
+                        <x-slot:actions>
+                            <flux:button size="sm" icon="cog-6-tooth" :href="route('plugins.configure', ['server', 'security-scanner'])" wire:navigate>{{ __('Configure') }}</flux:button>
+                        </x-slot:actions>
+                    @endcan
+                </flux:callout>
+            @endif
+
+            @if ($this->ai->isConfigured() || $aiEnabled)
+                <flux:switch wire:model.live="aiEnabled" :label="__('Review this server with AI')" align="left" :disabled="! $canManage || ! $this->ai->isConfigured()"
+                    :description="__('Every :hours hours. The scanner\'s counts, alerts and blocks, with the addresses and usernames in them, and the snapshot of the server\'s SSH settings, open ports, firewall, updates and accounts are sent to :host.', ['hours' => config('security-scanner.ai.interval_hours'), 'host' => $this->ai->host() ?? __('the configured API')])" />
+                <flux:error name="aiEnabled" />
+            @endif
+
+            @if ($this->state->ai_error)
+                <flux:callout icon="exclamation-triangle" color="red">
+                    <flux:callout.heading>{{ __('The last review failed') }}</flux:callout.heading>
+                    <flux:callout.text class="font-mono text-xs">{{ $this->state->ai_error }}</flux:callout.text>
+                </flux:callout>
+            @endif
+
+            @if ($review = $this->latestReview)
+                <div class="flex flex-col gap-1">
+                    <flux:text class="text-zinc-800 dark:text-zinc-200">{{ $review->summary }}</flux:text>
+                    <flux:text class="text-xs">{{ __('Reviewed :time by :model.', ['time' => $review->created_at->diffForHumans(), 'model' => $review->model]) }}</flux:text>
+                </div>
+
+                @if ($review->findings === [])
+                    <flux:text>{{ __('Nothing needs attention.') }}</flux:text>
+                @else
+                    <div class="flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-white/8 dark:border-white/8">
+                        @foreach ($review->sortedFindings() as $finding)
+                            <div class="flex flex-col gap-2 p-4" wire:key="finding-{{ $review->id }}-{{ $loop->index }}">
+                                <div class="flex items-center gap-2">
+                                    <flux:badge size="sm" :color="$finding['severity']->color()">{{ $finding['severity']->label() }}</flux:badge>
+                                    <span class="font-medium text-zinc-900 dark:text-white">{{ $finding['title'] }}</span>
+                                </div>
+                                <flux:text class="whitespace-pre-line">{{ $finding['detail'] }}</flux:text>
+                                @if (filled($finding['suggestion']))
+                                    <div class="rounded-md bg-zinc-50 p-3 dark:bg-white/5">
+                                        <flux:text class="text-xs font-medium uppercase tracking-wide">{{ __('Suggestion') }}</flux:text>
+                                        <flux:text class="mt-1 whitespace-pre-line break-words">{{ $finding['suggestion'] }}</flux:text>
+                                    </div>
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+                    <flux:text class="text-xs">{{ __('Suggestions come from an AI model and can be wrong. Check them before acting, and don\'t run a command you don\'t understand. Swage never runs them.') }}</flux:text>
+                @endif
+            @elseif ($aiEnabled)
+                <flux:text>{{ __('Waiting for the first review.') }}</flux:text>
+            @endif
+        </div>
     </x-panel>
 
     <flux:modal name="security-scanner-block" class="w-full max-w-lg">

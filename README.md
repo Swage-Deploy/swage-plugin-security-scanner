@@ -12,13 +12,13 @@
 
 ---
 
-Reads each server's SSH, sudo and nginx access logs every few minutes, counts brute force attempts and probing, raises alerts about SSH logins, and lets you block addresses in the server's firewall. It can also install fail2ban, which bans the addresses behind brute force attempts and probing.
+Reads each server's SSH, sudo and nginx access logs every few minutes, counts brute force attempts and probing, raises alerts about SSH logins, and lets you block addresses in the server's firewall. It can also install fail2ban, which bans the addresses behind brute force attempts and probing, and have an AI model review each server's security and suggest what to fix.
 
 The scanner is turned on per server, from the server's **Plugins** tab.
 
 ## Requirements
 
-- Swage `v1.0.1` or later
+- Swage `v1.0.1` or later. The [AI review](#ai-review) needs Swage `v1.3.0`, which added plugin settings.
 - Ubuntu servers with `ufw`, which Swage sets up when it provisions them
 
 ## Installation
@@ -101,6 +101,31 @@ Blocking and unblocking show in the server's activity log. Each scan checks the 
 
 The scanner refuses to block an address in Cloudflare's ranges, the address Swage connects to the server from, or the address you're using Swage from.
 
+## AI review
+
+The AI review has an AI model look over each server it's turned on for and suggest what to fix. It works with any OpenAI compatible chat completions API, such as OpenAI, OpenRouter, or a local Ollama or vLLM, through [Laravel AI](https://github.com/laravel/ai).
+
+**It only reads and suggests.** The model gets no tools and no access to the server. Swage gathers what it reviews and sends it as text, and the only thing the review writes is its findings, to Swage's database. Nothing the model suggests is ever run. A person decides what to do, and the panel's own actions, such as blocking an address or installing fail2ban, still need someone to click them.
+
+To set it up:
+
+1. On Swage's **Plugins** page, open the **Server** tab and **Configure Security scanner**. Enter:
+   - **API URL**: the base URL of the API, ending before `/chat/completions`, such as `https://api.openai.com/v1`.
+   - **API key**: sent as a bearer token. It's stored encrypted, and can be left blank for APIs that don't need one.
+   - **Model**: the model to use. It must support structured output (JSON schema responses).
+2. Turn on **Review this server with AI** in each server's Security scanner panel. The first review runs straight away. Then each server is reviewed every 6 hours, or whenever someone clicks **Review now**.
+
+Each review sends the API:
+
+- what the scanner recorded: event totals for the last day and each of the last 7 days, the 25 busiest hostile addresses with a few of the usernames or paths each tried, open alerts, blocked addresses and fail2ban's state,
+- a snapshot of how the server is set up, read by a fixed script that only runs read-only commands: the OS and kernel, whether a reboot is required, packages with pending updates, whether automatic updates are on, the effective `sshd` settings, listening ports, `ufw status`, accounts that can log in, how many authorized SSH keys each has, passwordless sudo rules, failed systemd units and recent logins.
+
+That includes IP addresses and account names, so only use an API you trust with them. The script runs over Swage's existing SSH connection, like a scan does. The model can't change it or add to it. The plugin's tests check that the script only runs commands that read, and never writes a file.
+
+The panel shows the latest review: a short summary, then each finding with its severity, what was seen and a suggestion. Suggestions can include shell commands. They come from a model and can be wrong, so check them before acting. Usernames and paths in the logs can be chosen by attackers, and the model is told to treat everything it's given as data, not instructions.
+
+A review that fails shows its error in the panel, and isn't tried again until the next review is due. Reviews are kept for 30 days and aren't recorded in the server's activity log.
+
 ## Configuration
 
 These can be set in Swage's `.env`:
@@ -110,8 +135,13 @@ These can be set in Swage's `.env`:
 | `SECURITY_SCANNER_INTERVAL` | `2` | Minutes between scans of each server. |
 | `SECURITY_SCANNER_RETENTION_DAYS` | `14` | Days of counted events to keep. |
 | `SECURITY_SCANNER_HTTP_PROBES` | `20` | Probes from one address in an hour before fail2ban bans it from the sites. Servers pick up a change when fail2ban is installed or updated. |
+| `SECURITY_SCANNER_AI_INTERVAL_HOURS` | `6` | Hours between AI reviews of each server. |
+| `SECURITY_SCANNER_AI_TIMEOUT` | `120` | Seconds to wait for the API to answer. |
+| `SECURITY_SCANNER_AI_RETENTION_DAYS` | `30` | Days of AI reviews to keep. |
 
-Scans run on Swage's queue, one at a time per server, and aren't recorded in the server's activity log.
+The AI review's API URL, key and model are set on the plugin's **Configure** page instead.
+
+Scans and AI reviews run on Swage's queue, one of each at a time per server, and aren't recorded in the server's activity log.
 
 ## Extending
 
@@ -129,12 +159,12 @@ sudo -u swage php /home/swage/app/current/artisan swage:plugin:update swage/secu
 
 The plugin implements Swage's server integration contract (`App\Servers\ServerIntegration`), version 1, so it runs inside a Swage install rather than on its own.
 
-`tests/SecurityScannerPluginTest.php` is a Pest test that runs inside a Swage checkout: it uses Swage's models, factories and test helpers. To run it:
+`tests/SecurityScannerPluginTest.php` and `tests/SecurityScannerAiReviewTest.php` are Pest tests that run inside a Swage checkout: they use Swage's models, factories and test helpers. To run them:
 
-1. Add this plugin's `src` directory to the Swage checkout's `autoload-dev` as `Swage\\SecurityScanner\\`.
+1. Add this plugin's `src` directory to the Swage checkout's `autoload-dev` as `Swage\\SecurityScanner\\`, and run `composer require laravel/ai:^1.3`.
 2. Run `composer dump-autoload`.
-3. Copy the test into Swage's `tests/Feature`.
-4. Run `php artisan test --filter=SecurityScannerPluginTest`.
+3. Copy the tests into Swage's `tests/Feature`.
+4. Run `php artisan test --filter=SecurityScanner`.
 
 The test runs the plugin's migrations itself.
 
