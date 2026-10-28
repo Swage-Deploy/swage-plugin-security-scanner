@@ -65,6 +65,11 @@ class ReviewServerSecurity implements ShouldBeUnique, ShouldQueue
                 timeout: (int) config('security-scanner.ai.timeout'),
             );
 
+            // Some APIs, such as Ollama's, ignore the requested format, and a reply that isn't JSON reads as empty.
+            if (blank($response['summary'] ?? null)) {
+                throw new RuntimeException(trim("The model's reply wasn't the JSON the review asks for, so it couldn't be read. Try Review now, or a model that follows instructions more closely. It began: ".mb_strimwidth(trim($response->text), 0, 300, '…')));
+            }
+
             AiReview::create([
                 'server_id' => $this->state->server_id,
                 'model' => (string) $settings->model(),

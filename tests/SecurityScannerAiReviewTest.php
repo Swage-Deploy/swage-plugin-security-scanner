@@ -243,6 +243,31 @@ test('reviews go to the configured OpenAI compatible API with its key and model,
         ->and($review->output_tokens)->toBe(5);
 });
 
+test('a reply that is not the JSON asked for fails the review instead of saving an empty one', function () {
+    configureAiReview(['url' => 'https://llm.internal.test/v1/']);
+    $state = aiState(Server::factory()->create());
+
+    Http::fake(['llm.internal.test/*' => Http::response([
+        'id' => 'chatcmpl-1',
+        'object' => 'chat.completion',
+        'model' => 'review-model',
+        'choices' => [[
+            'index' => 0,
+            'finish_reason' => 'stop',
+            'message' => ['role' => 'assistant', 'content' => "**Security Review**\n\n| Area | Findings |\n|---|---|\n| SSH | Keys only. |"],
+        ]],
+        'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 5, 'total_tokens' => 15],
+    ])]);
+
+    (new ReviewServerSecurity($state->fresh()))->handle(postureServer(), app(AiSettings::class), app(ReviewContext::class));
+
+    Http::assertSent(fn (Request $request): bool => str_contains($request['messages'][0]['content'], '"checked"'));
+
+    expect(AiReview::count())->toBe(0)
+        ->and($state->fresh()->ai_error)->toContain("wasn't the JSON")->toContain('**Security Review**')
+        ->and($state->fresh()->ai_reviewed_at)->not->toBeNull();
+});
+
 test('a failed review records the error without the API key and is not retried until due', function () {
     configureAiReview();
     $server = Server::factory()->create();

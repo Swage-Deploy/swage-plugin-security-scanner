@@ -3,8 +3,10 @@
 namespace Swage\SecurityScanner\Ai;
 
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\JsonSchema\JsonSchemaTypeFactory;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\HasStructuredOutput;
+use Laravel\Ai\ObjectSchema;
 use Laravel\Ai\Promptable;
 use Swage\SecurityScanner\Enums\AlertSeverity;
 
@@ -31,6 +33,9 @@ class SecurityReviewer implements Agent, HasStructuredOutput
     public function instructions(): string
     {
         $max = self::MAX_FINDINGS;
+
+        // Some APIs, such as Ollama's, ignore the requested response format, so the model is told the shape too.
+        $shape = json_encode((new ObjectSchema($this->schema(new JsonSchemaTypeFactory)))->toSchema(), JSON_UNESCAPED_SLASHES);
 
         return <<<TEXT
         You review the security of an Ubuntu server managed by Swage, a self-hosted panel for Laravel and PHP apps. Swage
@@ -62,6 +67,9 @@ class SecurityReviewer implements Agent, HasStructuredOutput
         Report at most {$max} findings, most severe first, and none rather than filler when nothing needs attention.
         Use high for things to act on now, medium for things to fix soon, and low for hardening worth considering.
         Write plain, short sentences.
+
+        Reply with only a JSON object, with no Markdown or other text around it, that matches this JSON schema:
+        {$shape}
         TEXT;
     }
 

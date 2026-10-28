@@ -112,7 +112,7 @@ To set it up:
 1. On Swage's **Plugins** page, open the **Server** tab and **Configure Security scanner**. Enter:
    - **API URL**: the base URL of the API, ending before `/chat/completions`, such as `https://api.openai.com/v1`.
    - **API key**: sent as a bearer token. It's stored encrypted, and can be left blank for APIs that don't need one.
-   - **Model**: the model to use. It must support structured output (JSON schema responses).
+   - **Model**: the model to use. It must reply in JSON reliably. The review asks for a JSON schema response and also spells the schema out in its instructions, since some APIs, such as Ollama's, ignore the requested format. A reply that isn't that JSON fails the review rather than showing as clean.
 2. Turn on **Review this server with AI** in each server's Security scanner panel. The first review runs straight away. Then each server is reviewed every 6 hours, or whenever someone clicks **Review now**.
 
 Each review sends the API:
