@@ -142,7 +142,7 @@
         </flux:table>
     </x-panel>
 
-    <x-panel icon="lock-closed" :heading="__('fail2ban')" :description="__('Bans addresses from SSH for an hour after five failed logins in ten minutes, and from sites for an hour after :count probes for vulnerable files in an hour, in nginx too, so visitors through Cloudflare are banned as well. Addresses banned three times in a day are banned for a week.', ['count' => config('security-scanner.fail2ban_probes')])">
+    <x-panel icon="lock-closed" :heading="__('fail2ban')" :description="__('Bans addresses from SSH for an hour after five failed logins in an hour, and from sites for an hour after :count probes for vulnerable files in an hour, in nginx too, so visitors through Cloudflare are banned as well. Addresses banned three times in a day are banned for a week.', ['count' => config('security-scanner.fail2ban_probes')])">
         @if ($this->state->fail2ban_installed)
             @if ($this->state->needsFail2banUpdate())
                 <flux:callout icon="arrow-path" color="amber" class="mb-4">
@@ -152,6 +152,9 @@
                     @elseif ($this->state->fail2banMissesRepeatOffenders())
                         <flux:callout.heading>{{ __('fail2ban never bans addresses for a week') }}</flux:callout.heading>
                         <flux:callout.text>{{ __('Its recidive jail can\'t see fail2ban\'s bans, so addresses banned for an hour come back as soon as the ban ends. Update it to ban them for a week after three bans in a day.') }}</flux:callout.text>
+                    @elseif ($this->state->fail2banMissesPacedSsh())
+                        <flux:callout.heading>{{ __('fail2ban misses slow SSH attacks') }}</flux:callout.heading>
+                        <flux:callout.text>{{ __('It only bans addresses after five failed logins in ten minutes, so attackers who pace their guesses are never banned. Update it to count failed logins over an hour.') }}</flux:callout.text>
                     @else
                         <flux:callout.heading>{{ __('fail2ban doesn\'t ban probing yet') }}</flux:callout.heading>
                         <flux:callout.text>{{ __('It was installed before the scanner could ban addresses probing sites. Update it to add the probes jail.') }}</flux:callout.text>

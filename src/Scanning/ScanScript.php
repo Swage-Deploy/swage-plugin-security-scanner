@@ -87,6 +87,8 @@ final readonly class ScanScript
             grep -qs '^ignoreip = ' /etc/fail2ban/jail.d/swage.conf && echo 'ignores-panel yes' || echo 'ignores-panel no'
             # Jails installed before recidive read fail2ban's log read the journal, where its bans never appear.
             fail2ban-client status recidive 2>/dev/null | grep -q 'File list' && echo 'recidive-reads-log yes' || echo 'recidive-reads-log no'
+            # Jails installed before SSH failures were counted over an hour miss attackers who pace their guesses.
+            [ "\$(fail2ban-client get sshd findtime 2>/dev/null)" -ge 3600 ] 2>/dev/null && echo 'sshd-counts-hour yes' || echo 'sshd-counts-hour no'
             for jail in sshd recidive {$probesJail}; do
                 fail2ban-client status "\$jail" 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p'
             done
@@ -203,6 +205,11 @@ final readonly class ScanScript
         if (preg_match('/^recidive-reads-log (yes|no)$/m', $rest, $recidive)) {
             $result->fail2banRecidiveReadsLog = $recidive[1] === 'yes';
             $rest = str_replace($recidive[0], '', $rest);
+        }
+
+        if (preg_match('/^sshd-counts-hour (yes|no)$/m', $rest, $sshd)) {
+            $result->fail2banSshdCountsHour = $sshd[1] === 'yes';
+            $rest = str_replace($sshd[0], '', $rest);
         }
 
         if (preg_match('/^jails ?(.*)$/m', $rest, $jails)) {

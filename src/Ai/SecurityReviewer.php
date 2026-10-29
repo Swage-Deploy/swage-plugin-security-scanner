@@ -64,6 +64,11 @@ class SecurityReviewer implements Agent, HasStructuredOutput
         so don't report that the blocked list is short, and don't suggest blocking addresses fail2ban can deal with.
         Only report hostile addresses when fail2ban is missing or not keeping up, as its misses_ fields say, when one
         address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in.
+
+        Failed SSH password guesses can only succeed when the SSH settings allow passwords (passwordauthentication or
+        kbdinteractiveauthentication yes) and an account that can log in has a usable password under passwords, and for
+        root only when permitrootlogin is yes. When none can succeed, guessing is noise however much of it there is: don't
+        report it above low, and only suggest turning off password logins as hardening.
         A snapshot section of "none" means its command ran and found nothing. "unavailable", or a missing section, means
         it could not be read: say so in what you checked, and don't guess what it would have shown.
 

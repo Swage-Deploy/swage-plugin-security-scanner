@@ -52,6 +52,11 @@ final class ScanOutput
     public ?bool $fail2banRecidiveReadsLog = null;
 
     /**
+     * Whether fail2ban's sshd jail counts failures over at least an hour, or null when it could not say.
+     */
+    public ?bool $fail2banSshdCountsHour = null;
+
+    /**
      * The addresses in nginx's deny list, or null when the server does not run nginx.
      *
      * @var list<string>|null

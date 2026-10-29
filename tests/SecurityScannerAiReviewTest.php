@@ -142,6 +142,24 @@ test('the snapshot script only runs commands that read', function () {
     }
 });
 
+test('the snapshot lists which accounts have a password, never the password hashes', function () {
+    $script = (new PostureScript('@@SWAGE_POSTURE_TEST'))->render();
+
+    expect($script)->toContain('section passwords')
+        ->toContain('{ print $1, "empty password" }')
+        ->toContain('{ print $1, "password set" }')
+        ->and(preg_match_all('/print \$2/', $script))->toBe(0)
+        ->and(PostureScript::SECTIONS)->toHaveKey('passwords');
+});
+
+test('the reviewer is told password guesses that can\'t succeed are noise', function () {
+    expect((new SecurityReviewer)->instructions())
+        ->toContain('Failed SSH password guesses can only succeed when the SSH settings allow passwords')
+        ->toContain('root only when permitrootlogin is yes')
+        ->toContain('guessing is noise however much of it there is')
+        ->toContain('report it above low');
+});
+
 test('the snapshot is read by its marker, keeping only known sections, each cut to size', function () {
     $script = new PostureScript('@@SWAGE_POSTURE_TEST');
 

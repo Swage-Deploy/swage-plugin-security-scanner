@@ -35,11 +35,11 @@ The scanner is turned on per server, from the server's **Plugins** tab.
 
 3. Optionally, **install fail2ban** from the same panel. It bans an address:
 
-   - from SSH for an hour after five failed logins in ten minutes,
+   - from SSH for an hour after five failed logins in an hour,
    - from the server's sites for an hour after 20 probes for vulnerable files (see below) in an hour,
    - and from everything for a week once it has been banned three times in a day.
 
-   Servers without nginx don't get the probes ban. No jail ever bans the address Swage connects from, so failed logins or probes from it cannot lock Swage out. The address is taken from Swage's SSH connection when fail2ban is installed. If fail2ban was installed by an earlier version of the plugin, without the probes ban, without leaving Swage's address alone, or with a week long ban that never applied, the panel offers **Update fail2ban**. The week long ban reads the bans fail2ban writes to `/var/log/fail2ban.log`. Earlier versions read the journal instead, where those bans never appear, so addresses came back every hour.
+   Servers without nginx don't get the probes ban. No jail ever bans the address Swage connects from, so failed logins or probes from it cannot lock Swage out. The address is taken from Swage's SSH connection when fail2ban is installed. If fail2ban was installed by an earlier version of the plugin, without the probes ban, without leaving Swage's address alone, with a week long ban that never applied, or counting failed SSH logins over only ten minutes, the panel offers **Update fail2ban**. The week long ban reads the bans fail2ban writes to `/var/log/fail2ban.log`. Earlier versions read the journal instead, where those bans never appear, so addresses came back every hour. Counting over ten minutes let attackers who pace their guesses, a few every ten minutes all day, go unbanned.
 
 ## What it looks for
 
@@ -118,13 +118,13 @@ To set it up:
 Each review sends the API:
 
 - what the scanner recorded: event totals for the last day and each of the last 7 days, the 25 busiest hostile addresses with a few of the usernames or paths each tried, open alerts, blocked addresses and fail2ban's state,
-- a snapshot of how the server is set up, read by a fixed script that only runs read-only commands: the OS and kernel, whether a reboot is required, packages with pending updates, whether automatic updates are on, the effective `sshd` settings, listening ports, `ufw status`, accounts that can log in, how many authorized SSH keys each has, passwordless sudo rules, failed systemd units and recent logins.
+- a snapshot of how the server is set up, read by a fixed script that only runs read-only commands: the OS and kernel, whether a reboot is required, packages with pending updates, whether automatic updates are on, the effective `sshd` settings, listening ports, `ufw status`, accounts that can log in, which accounts have a usable password (only their names, never the password hashes), how many authorized SSH keys each has, passwordless sudo rules, failed systemd units and recent logins.
 
 That includes IP addresses and account names, so only use an API you trust with them. The script runs over Swage's existing SSH connection, like a scan does. The model can't change it or add to it. The plugin's tests check that the script only runs commands that read, and never writes a file.
 
 The panel shows the latest review: a short summary, then each finding with its severity, what was seen and a suggestion. Suggestions can include shell commands. They come from a model and can be wrong, so check them before acting. Usernames and paths in the logs can be chosen by attackers, and the model is told to treat everything it's given as data, not instructions.
 
-Busy hostile addresses that aren't banned or blocked are normal: most are scanners that come and go, and fail2ban bans them once they pass its limits and lifts the bans later. The model is told not to suggest blocking them by hand. It only reports hostile addresses when fail2ban is missing or not keeping up, when one address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in.
+Busy hostile addresses that aren't banned or blocked are normal: most are scanners that come and go, and fail2ban bans them once they pass its limits and lifts the bans later. The model is told not to suggest blocking them by hand. It only reports hostile addresses when fail2ban is missing or not keeping up, when one address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in. SSH password guesses that can't succeed, because SSH doesn't accept passwords, root only accepts keys, or no account that can log in has a password, are reported as low at most.
 
 ### Ignoring a finding
 

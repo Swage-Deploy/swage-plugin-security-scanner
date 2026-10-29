@@ -15,7 +15,7 @@ use Swage\SecurityScanner\Jobs\InstallFail2ban;
  * @property array{journal?: string|null, files?: array<string, array{inode: int, offset: int}>}|null $cursors
  */
 #[Table('security_scanner_states')]
-#[Fillable(['server_id', 'enabled', 'cursors', 'panel_address', 'fail2ban_installed', 'fail2ban_jails', 'fail2ban_ignores_panel', 'fail2ban_recidive_reads_log', 'fail2ban_banned', 'last_scanned_at', 'last_error', 'ai_enabled', 'ai_reviewed_at', 'ai_error'])]
+#[Fillable(['server_id', 'enabled', 'cursors', 'panel_address', 'fail2ban_installed', 'fail2ban_jails', 'fail2ban_ignores_panel', 'fail2ban_recidive_reads_log', 'fail2ban_sshd_counts_hour', 'fail2ban_banned', 'last_scanned_at', 'last_error', 'ai_enabled', 'ai_reviewed_at', 'ai_error'])]
 class ScannerState extends Model
 {
     /**
@@ -42,6 +42,7 @@ class ScannerState extends Model
             'fail2ban_jails' => 'array',
             'fail2ban_ignores_panel' => 'boolean',
             'fail2ban_recidive_reads_log' => 'boolean',
+            'fail2ban_sshd_counts_hour' => 'boolean',
             'fail2ban_banned' => 'array',
             'last_scanned_at' => 'datetime',
             'ai_enabled' => 'boolean',
@@ -73,11 +74,20 @@ class ScannerState extends Model
 
     /**
      * Determine if fail2ban needs updating, because it could ban Swage's own address, never bans repeat offenders for
-     * a week, or does not ban probing yet.
+     * a week, misses SSH attackers who pace their guesses, or does not ban probing yet.
      */
     public function needsFail2banUpdate(): bool
     {
-        return $this->fail2banCanBanPanel() || $this->fail2banMissesRepeatOffenders() || $this->fail2banMissesProbes();
+        return $this->fail2banCanBanPanel() || $this->fail2banMissesRepeatOffenders() || $this->fail2banMissesPacedSsh() || $this->fail2banMissesProbes();
+    }
+
+    /**
+     * Determine if fail2ban's sshd jail only counts failures over ten minutes, so attackers who stay under five
+     * guesses in ten minutes are never banned. Servers not scanned since this was checked can't tell.
+     */
+    public function fail2banMissesPacedSsh(): bool
+    {
+        return $this->fail2ban_installed && $this->fail2ban_sshd_counts_hour === false;
     }
 
     /**

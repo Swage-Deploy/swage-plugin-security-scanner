@@ -11,8 +11,8 @@ use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Models\ScannerState;
 
 /**
- * Installs fail2ban to ban addresses that keep failing to log in over SSH, with the same jails as the Swage host:
- * an hour's ban after five failures in ten minutes, and a week's ban for addresses banned three times in a day.
+ * Installs fail2ban to ban addresses that keep failing to log in over SSH: an hour's ban after five failures in an
+ * hour, so attackers who pace their guesses are caught too, and a week's ban for addresses banned three times in a day.
  *
  * On servers with nginx it also bans addresses probing for vulnerable files from the sites for an hour, using the
  * scanner's own probe patterns, and they count towards the week's ban too. Bans from the probes and recidive jails
@@ -87,9 +87,11 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         maxretry = 5
         backend = systemd
 
+        # Attackers pace their guesses to stay under five in ten minutes, so SSH failures are counted over an hour.
         [sshd]
         enabled = true
         port = {$port}
+        findtime = 1h
 
         # recidive reads the bans fail2ban writes to its own log file, which isn't in the journal.
         [recidive]
@@ -123,7 +125,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         echo "fail2ban is installed."
         BASH);
 
-        ScannerState::for($this->server)->update(['fail2ban_installed' => true, 'fail2ban_ignores_panel' => true, 'fail2ban_recidive_reads_log' => true]);
+        ScannerState::for($this->server)->update(['fail2ban_installed' => true, 'fail2ban_ignores_panel' => true, 'fail2ban_recidive_reads_log' => true, 'fail2ban_sshd_counts_hour' => true]);
     }
 
     /**

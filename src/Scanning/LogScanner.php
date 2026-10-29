@@ -60,6 +60,7 @@ class LogScanner
             'fail2ban_banned' => $output->fail2banBanned,
             'fail2ban_ignores_panel' => $output->fail2banIgnoresPanel,
             'fail2ban_recidive_reads_log' => $output->fail2banRecidiveReadsLog,
+            'fail2ban_sshd_counts_hour' => $output->fail2banSshdCountsHour,
             'last_scanned_at' => now(),
             'last_error' => null,
         ]);

@@ -36,6 +36,7 @@ final readonly class PostureScript
         'listening' => 'Listening ports',
         'firewall' => 'Firewall (ufw) status',
         'accounts' => 'Accounts that can log in, and root equivalents',
+        'passwords' => 'Accounts with a usable password',
         'authorized-keys' => 'Authorized SSH keys per account',
         'sudo' => 'Passwordless sudo rules',
         'failed-units' => 'Failed systemd units',
@@ -94,6 +95,10 @@ final readonly class PostureScript
 
         section accounts
         awk -F: '\$3 == 0 || (\$3 >= 1000 && \$7 !~ /(nologin|false)\$/) { print \$1, "uid=" \$3, \$7 }' /etc/passwd | or_none
+
+        # Only account names are printed, never the password hashes.
+        section passwords
+        if out=\$(awk -F: '\$2 == "" { print \$1, "empty password" } \$2 != "" && \$2 !~ /^[!*]/ { print \$1, "password set" }' /etc/shadow 2>/dev/null); then printf '%s\\n' "\$out" | or_none; else echo unavailable; fi
 
         section authorized-keys
         while IFS=: read -r name _ uid _ _ home _; do
