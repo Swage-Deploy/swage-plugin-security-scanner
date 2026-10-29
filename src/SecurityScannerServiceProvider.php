@@ -21,7 +21,7 @@ class SecurityScannerServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/security-scanner.php', 'security-scanner');
 
-        // Swage v1.3.0 added plugin settings, which hold the AI review's API, and v1.4.0 added the badges on servers that
+        // Swage v1.3.0 added plugin settings, which hold the AI review's API, and v1.3.3 added the badges on servers that
         // need looking at. Older versions get the scanner without them.
         $this->app->bind(SecurityScannerIntegration::class, match (true) {
             interface_exists(HasAttention::class) => AttentiveSecurityScannerIntegration::class,

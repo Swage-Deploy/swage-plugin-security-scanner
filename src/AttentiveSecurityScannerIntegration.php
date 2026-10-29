@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Collection;
 
 /**
  * The integration, also saying which servers have open alerts or AI review findings, so Swage badges them on the
- * servers page and their Plugins tab. Badges need Swage v1.4.0, so on older versions the plugin registers one of the
+ * servers page and their Plugins tab. Badges need Swage v1.3.3, so on older versions the plugin registers one of the
  * integrations it extends instead.
  */
 class AttentiveSecurityScannerIntegration extends ConfigurableSecurityScannerIntegration implements HasAttention

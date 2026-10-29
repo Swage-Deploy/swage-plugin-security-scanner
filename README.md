@@ -18,7 +18,7 @@ The scanner is turned on per server, from the server's **Plugins** tab.
 
 ## Requirements
 
-- Swage `v1.0.1` or later. The [AI review](#ai-review) needs Swage `v1.3.0`, which added plugin settings, and the [badges](#badges-on-servers-that-need-looking-at) need Swage `v1.4.0`.
+- Swage `v1.0.1` or later. The [AI review](#ai-review) needs Swage `v1.3.0`, which added plugin settings, and the [badges](#badges-on-servers-that-need-looking-at) need Swage `v1.3.3`.
 - Ubuntu servers with `ufw`, which Swage sets up when it provisions them
 
 ## Installation
@@ -147,7 +147,7 @@ A review that fails shows its error in the panel, and isn't tried again until th
 
 ## Badges on servers that need looking at
 
-On Swage `v1.4.0` or later, a server with something in its Security scanner panel to look at gets a badge with the count: on its card on the servers page, on its **Plugins** tab, and on the Security scanner's tab. Hover over it to see what's counted. It counts:
+On Swage `v1.3.3` or later, a server with something in its Security scanner panel to look at gets a badge with the count: on its card on the servers page, on its **Plugins** tab, and on the Security scanner's tab. Hover over it to see what's counted. It counts:
 
 - open SSH login alerts, leaving out addresses fail2ban has banned or that are blocked, as the panel's Open alerts table does,
 - findings in the latest AI review that nobody has ignored, while the server is still reviewed.
