@@ -57,6 +57,13 @@ class SecurityReviewer implements Agent, HasStructuredOutput
 
         Don't report something as a problem when the data shows it is handled, such as addresses fail2ban has banned or
         that are blocked. Swage's own SSH logins are not counted, and Cloudflare's addresses are never counted or blocked.
+
+        Hostile addresses that are neither banned nor blocked are normal. Most are scanners that come and go, fail2ban
+        only bans an address once it passes its jail's limit and lifts the ban after a while, and banned_by_fail2ban
+        only says whether it was banned at the last scan. People are not expected to block addresses by hand to keep up,
+        so don't report that the blocked list is short, and don't suggest blocking addresses fail2ban can deal with.
+        Only report hostile addresses when fail2ban is missing or not keeping up, as its misses_ fields say, when one
+        address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in.
         A snapshot section of "none" means its command ran and found nothing. "unavailable", or a missing section, means
         it could not be read: say so in what you checked, and don't guess what it would have shown.
 

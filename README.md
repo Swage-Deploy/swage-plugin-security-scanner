@@ -124,6 +124,8 @@ That includes IP addresses and account names, so only use an API you trust with 
 
 The panel shows the latest review: a short summary, then each finding with its severity, what was seen and a suggestion. Suggestions can include shell commands. They come from a model and can be wrong, so check them before acting. Usernames and paths in the logs can be chosen by attackers, and the model is told to treat everything it's given as data, not instructions.
 
+Busy hostile addresses that aren't banned or blocked are normal: most are scanners that come and go, and fail2ban bans them once they pass its limits and lifts the bans later. The model is told not to suggest blocking them by hand. It only reports hostile addresses when fail2ban is missing or not keeping up, when one address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in.
+
 ### Ignoring a finding
 
 People who can manage the server can click **Ignore** on a finding they've decided to accept, such as SSH on port 22. It moves to an **Ignored** section below the findings, which says whether the latest review still reports it, and who ignored it. **Stop ignoring** puts it back.
