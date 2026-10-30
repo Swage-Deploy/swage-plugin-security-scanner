@@ -230,7 +230,7 @@
             </x-slot:actions>
         @endif
 
-        <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-6">
             @if (! $this->ai::supported())
                 <flux:text>{{ __('The AI review needs Swage v1.3.0 or later.') }}</flux:text>
             @elseif (! $this->ai->isConfigured())
@@ -290,7 +290,7 @@
                 @else
                     <div class="flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-white/8 dark:border-white/8">
                         @foreach ($findings as $finding)
-                            <div class="flex flex-col gap-2 p-4" wire:key="finding-{{ $review->id }}-{{ $finding['key'] }}">
+                            <div class="flex flex-col gap-3 p-4" wire:key="finding-{{ $review->id }}-{{ $finding['key'] }}">
                                 <div class="flex items-center gap-2">
                                     <flux:badge size="sm" :color="$finding['severity']->color()">{{ $finding['severity']->label() }}</flux:badge>
                                     <span class="font-medium text-zinc-900 dark:text-white">{{ $finding['title'] }}</span>
@@ -348,15 +348,19 @@
                 @endif
 
                 @if (filled($review->checked))
-                    <div>
-                        <flux:text class="text-xs font-medium uppercase tracking-wide">{{ __('Checked') }}</flux:text>
-                        <dl class="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(0,12rem)_1fr]">
+                    <details class="group rounded-lg border border-zinc-200 dark:border-white/8" wire:key="checked-{{ $review->id }}" wire:ignore.self>
+                        <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-zinc-800 dark:text-zinc-200 [&::-webkit-details-marker]:hidden">
+                            <flux:icon.chevron-right variant="micro" class="text-zinc-400 transition-transform group-open:rotate-90" />
+                            {{ __('What was checked') }}
+                            <flux:badge size="sm" color="zinc">{{ count($review->checked) }}</flux:badge>
+                        </summary>
+                        <dl class="grid gap-x-6 gap-y-3 border-t border-zinc-200 px-4 py-4 text-sm sm:grid-cols-[minmax(0,12rem)_1fr] dark:border-white/8">
                             @foreach ($review->checked as $entry)
                                 <dt class="font-medium text-zinc-800 dark:text-zinc-200" wire:key="checked-{{ $review->id }}-{{ $loop->index }}">{{ $entry['area'] }}</dt>
-                                <dd class="mb-1 text-zinc-600 sm:mb-0 dark:text-zinc-400">{{ $entry['observation'] }}</dd>
+                                <dd class="-mt-2 text-zinc-600 sm:mt-0 dark:text-zinc-400">{{ $entry['observation'] }}</dd>
                             @endforeach
                         </dl>
-                    </div>
+                    </details>
                 @else
                     <flux:callout icon="question-mark-circle" color="amber">
                         <flux:callout.text>{{ __('The model didn\'t say what it checked, so there\'s no sign it read the server. Try Review now, or a model that follows instructions more closely.') }}</flux:callout.text>

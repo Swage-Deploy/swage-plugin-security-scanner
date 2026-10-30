@@ -443,7 +443,7 @@ test('the panel turns the review on only once it is configured, and shows the la
         ->assertSee('Root can log in with a password')
         ->assertSee('Set PermitRootLogin to prohibit-password.')
         ->assertSee('Swage never runs them')
-        ->assertSee('Checked')
+        ->assertSee('What was checked')
         ->assertSee('Root may log in with a password.')
         ->assertSee('review-model (review-model-2026-10)')
         ->assertSee('Read 12,345 tokens and wrote 678.')
@@ -503,7 +503,7 @@ test('an ignored finding moves under Ignored, and later reviews are told about i
 
     $panel = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
         ->call('ignoreFinding', 'ssh-default-port')
-        ->assertSeeInOrder(['MySQL listens publicly', 'Swage never runs them', 'Ignored', 'SSH listens on port 22', 'Stop ignoring', 'Still reported by the latest review.', 'Checked']);
+        ->assertSeeInOrder(['MySQL listens publicly', 'Swage never runs them', 'Ignored', 'SSH listens on port 22', 'Stop ignoring', 'Still reported by the latest review.', 'What was checked']);
 
     $ignored = IgnoredFinding::sole();
 
