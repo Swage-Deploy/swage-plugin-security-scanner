@@ -99,7 +99,20 @@ Log lines contain text that attackers choose, such as request paths and username
 
 Blocking and unblocking show in the server's activity log. Each scan checks the nginx deny list and blocks again any blocked address missing from it, such as addresses blocked by older versions of the plugin.
 
-The scanner refuses to block an address in Cloudflare's ranges, the address Swage connects to the server from, or the address you're using Swage from.
+The scanner refuses to block an address in Cloudflare's ranges, the address Swage connects to the server from, the address you're using Swage from, or a trusted address.
+
+## Trusted addresses
+
+**Trust address** on the trusted addresses panel, or **Trust** on an alert, trusts an address or a range on that server, such as your office's `203.0.113.0/24`, with an optional note. Ranges can be no wider than /16 for IPv4 or /32 for IPv6, and are stored with their host bits cleared, so `203.0.113.7/24` is stored as `203.0.113.0/24`.
+
+A trusted address:
+
+- **isn't counted or alerted on.** Scans leave out its events, as they do Cloudflare's. Trusting it clears what the scanner already recorded about it, and resolves its open alerts.
+- **can't be blocked.** Trusting a blocked address unblocks it.
+- **is never banned by fail2ban.** It's added to every jail's `ignoreip`. When trusted addresses change, Swage rewrites the `ignoreip` lines in `/etc/fail2ban/jail.d/swage.conf` and `swage-probes.conf`, runs `fail2ban-client reload`, which keeps its bans and the failures it has counted, and lifts any ban on a trusted address. This shows in the server's activity log. Installing or updating fail2ban includes them too.
+- **is left out of the AI review.** The review is sent the trusted addresses and their notes, and told not to report anything about them, such as their logins under recent logins.
+
+Stopping trusting an address takes it out of fail2ban's `ignoreip` again. What the scanner cleared isn't restored, and it's counted again from the next scan.
 
 ## AI review
 

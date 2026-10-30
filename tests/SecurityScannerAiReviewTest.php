@@ -32,6 +32,7 @@ use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
+use Swage\SecurityScanner\Models\TrustedAddress;
 use Swage\SecurityScanner\SecurityScannerIntegration;
 use Swage\SecurityScanner\SecurityScannerServiceProvider;
 
@@ -185,6 +186,16 @@ test('the reviewer is told failed attempts as accounts that don\'t exist are not
         ->toContain('Only events counted as "SSH logins" are logins that succeeded.')
         ->toContain('they don\'t show accounts on')
         ->toContain('The snapshot\'s accounts sections are what exists.');
+});
+
+test('the review is told which addresses are trusted, and to leave them out', function () {
+    $server = Server::factory()->create();
+    TrustedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.0/24', 'note' => 'Office']);
+
+    expect(app(ReviewContext::class)->build(ScannerState::for($server), [])['trusted_addresses'])->toBe([['address' => '203.0.113.0/24', 'note' => 'Office']])
+        ->and((new SecurityReviewer)->instructions())
+        ->toContain('People trust the addresses and ranges under trusted_addresses')
+        ->toContain('Don\'t report anything about them');
 });
 
 test('the snapshot is read by its marker, keeping only known sections, each cut to size', function () {

@@ -9,10 +9,12 @@ use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Jobs\BlockAddress;
 use Swage\SecurityScanner\Models\BlockedAddress;
 use Swage\SecurityScanner\Models\ScannerState;
+use Swage\SecurityScanner\Models\TrustedAddress;
 
 /**
  * Reads what a server's logs gained since the last scan, counts it and raises alerts from it. Events from Cloudflare's
- * own addresses are left out, so they are never ranked or blocked.
+ * own addresses, and from addresses trusted on the server, are left out, so they are never ranked, alerted on or
+ * blocked.
  */
 class LogScanner
 {
@@ -47,7 +49,10 @@ class LogScanner
             array_push($events, ...$this->nginxParser->parse($file->lines(), $file->source()));
         }
 
-        $events = array_values(array_filter($events, fn (LogEvent $event): bool => $event->ip === null || ! CloudflareAddresses::contains($event->ip)));
+        $trusted = TrustedAddress::rangesFor($state->server_id);
+
+        $events = array_values(array_filter($events, fn (LogEvent $event): bool => $event->ip === null
+            || (! CloudflareAddresses::contains($event->ip) && ! TrustedAddress::covers($trusted, $event->ip))));
 
         $this->recorder->record($state->server, $events);
         $this->detector->detect($state, $events);

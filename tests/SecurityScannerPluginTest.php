@@ -20,11 +20,13 @@ use Swage\SecurityScanner\Jobs\BlockAddress;
 use Swage\SecurityScanner\Jobs\InstallFail2ban;
 use Swage\SecurityScanner\Jobs\ScanServerLogs;
 use Swage\SecurityScanner\Jobs\UnblockAddress;
+use Swage\SecurityScanner\Jobs\UpdateFail2banTrustedAddresses;
 use Swage\SecurityScanner\Livewire\SecurityPanel;
 use Swage\SecurityScanner\Models\BlockedAddress;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
+use Swage\SecurityScanner\Models\TrustedAddress;
 use Swage\SecurityScanner\Scanning\LogScanner;
 use Swage\SecurityScanner\Scanning\NginxAccessParser;
 use Swage\SecurityScanner\Scanning\ScannedFile;
@@ -783,4 +785,143 @@ test('cloudflare\'s ranges come from swage\'s own list', function () {
     expect(CloudflareAddresses::ranges())->toBe(CloudflareNetworks::RANGES)
         ->and(CloudflareAddresses::contains('104.16.1.1'))->toBeTrue()
         ->and(CloudflareAddresses::contains('203.0.113.9'))->toBeFalse();
+});
+
+test('trusted addresses are stored as an address or a range no wider than the limit, with host bits cleared', function (string $value, ?string $stored) {
+    expect(TrustedAddress::normalize($value))->toBe($stored);
+})->with([
+    ['203.0.113.7', '203.0.113.7'],
+    [' 2001:DB8:0:0::7 ', '2001:db8::7'],
+    ['203.0.113.7/24', '203.0.113.0/24'],
+    ['203.0.113.7/32', '203.0.113.7'],
+    ['10.1.2.3/16', '10.1.0.0/16'],
+    ['2001:db8:abcd:12::1/48', '2001:db8:abcd::/48'],
+    ['10.0.0.0/8', null],
+    ['0.0.0.0/0', null],
+    ['2001:db8::/16', null],
+    ['203.0.113.7/33', null],
+    ['203.0.113.7/x', null],
+    ['not-an-ip', null],
+    ['203.0.113.7; rm -rf /', null],
+]);
+
+test('trusting an address clears what was recorded about it, resolves its alerts, unblocks it and updates fail2ban', function () {
+    Queue::fake();
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['last_scanned_at' => now()]);
+    $other = Server::factory()->create();
+
+    foreach ([[$server, '203.0.113.9'], [$server, '203.0.113.200'], [$server, '198.51.100.5'], [$other, '203.0.113.9']] as [$owner, $ip]) {
+        SecurityEvent::create(['server_id' => $owner->id, 'kind' => EventKind::SshFailedLogin, 'ip' => $ip, 'source' => 'sshd', 'bucket' => now()->startOfHour(), 'count' => 3, 'first_seen_at' => now(), 'last_seen_at' => now()]);
+    }
+
+    $alert = SecurityAlert::create(['server_id' => $server->id, 'rule' => AlertRule::SshLoginNewAddress, 'severity' => AlertSeverity::Low, 'subject' => '203.0.113.9', 'details' => ['user' => 'root'], 'first_seen_at' => now(), 'last_seen_at' => now()]);
+    $blocked = BlockedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.200', 'status' => ResourceStatus::Installed]);
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->set('trustIp', '203.0.113.50/24')
+        ->set('trustNote', 'Office')
+        ->call('trust')
+        ->assertHasNoErrors()
+        ->assertSee('203.0.113.0/24')
+        ->assertSee('Office')
+        ->call('trust', '203.0.113.0/24')
+        ->assertHasErrors(['trustIp'])
+        ->call('trust', '10.0.0.0/8')
+        ->assertHasErrors(['trustIp'])
+        ->call('block', '203.0.113.77')
+        ->assertHasErrors(['ip']);
+
+    expect(TrustedAddress::sole())
+        ->ip->toBe('203.0.113.0/24')
+        ->note->toBe('Office')
+        ->trusted_by_id->toBe($server->user->id)
+        ->and(SecurityEvent::where('server_id', $server->id)->pluck('ip')->all())->toBe(['198.51.100.5'])
+        ->and(SecurityEvent::where('server_id', $other->id)->count())->toBe(1)
+        ->and($alert->fresh()->resolved_by_id)->toBe($server->user->id)
+        ->and($blocked->fresh()->status)->toBe(ResourceStatus::Removing);
+
+    Queue::assertPushed(UnblockAddress::class, fn (UnblockAddress $job): bool => $job->address->is($blocked));
+    Queue::assertPushed(UpdateFail2banTrustedAddresses::class, 1);
+});
+
+test('an alert about an address can trust it, and trusted addresses can be removed', function () {
+    Queue::fake();
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['last_scanned_at' => now()]);
+    $alert = SecurityAlert::create(['server_id' => $server->id, 'rule' => AlertRule::SshLoginNewAddress, 'severity' => AlertSeverity::Low, 'subject' => '198.51.100.20', 'details' => ['user' => 'root'], 'first_seen_at' => now(), 'last_seen_at' => now()]);
+
+    $panel = Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->call('trustFromAlert', $alert->id)
+        ->assertSee('No open alerts.');
+
+    $trusted = TrustedAddress::sole();
+
+    expect($trusted->ip)->toBe('198.51.100.20')
+        ->and($trusted->note)->toBe(AlertRule::SshLoginNewAddress->title());
+
+    $panel->call('untrust', $trusted->id)->assertSee('No addresses are trusted.');
+
+    expect(TrustedAddress::count())->toBe(0);
+    Queue::assertPushed(UpdateFail2banTrustedAddresses::class, 2);
+});
+
+test('scans never count or alert on trusted addresses', function () {
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['last_scanned_at' => now()->subHour()]);
+    TrustedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.0/24']);
+
+    scannedServer(
+        journal: [
+            ...array_fill(0, 10, sshLine('Failed password for root from 203.0.113.9 port 50000 ssh2')),
+            sshLine('Accepted publickey for root from 203.0.113.9 port 50003 ssh2: ED25519 SHA256:abc'),
+            sshLine('Failed password for root from 192.0.2.4 port 50000 ssh2'),
+        ],
+        files: ['/var/log/nginx/access.log' => ['inode' => 1, 'start' => 0, 'new' => true, 'content' => accessLine('203.0.113.10', 'GET /.env HTTP/1.1')."\n"]],
+    );
+    scan($server);
+
+    expect(SecurityEvent::pluck('ip')->all())->toBe(['192.0.2.4'])
+        ->and(SecurityAlert::count())->toBe(0);
+});
+
+test('fail2ban never bans trusted addresses', function () {
+    $shell = fakeShell();
+    $server = Server::factory()->create();
+    TrustedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.0/24']);
+
+    app()->call([new InstallFail2ban($server), 'handle']);
+
+    expect($shell->lastScript())
+        ->toContain("[DEFAULT]\nignoreip = 127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 203.0.113.0/24\n")
+        ->toContain('ignoreip = 127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 203.0.113.0/24 173.245.48.0/20');
+});
+
+test('changing trusted addresses rewrites fail2ban\'s ignore lists, reloads it and lifts bans on them', function () {
+    $shell = fakeShell();
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['fail2ban_installed' => true, 'panel_address' => '198.51.100.7', 'fail2ban_banned' => ['203.0.113.9', '192.0.2.4']]);
+    TrustedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.0/24']);
+
+    app()->call([new UpdateFail2banTrustedAddresses($server), 'handle']);
+
+    $script = $shell->lastScript();
+
+    expect($script)
+        ->toContain('sed -i "s|^ignoreip = .*|ignoreip = 127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 198.51.100.7 203.0.113.0/24|; s/@SWAGE_PANEL_ADDRESS@/$panel_address/" /etc/fail2ban/jail.d/swage.conf')
+        ->toContain('ignoreip = 127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 198.51.100.7 203.0.113.0/24 173.245.48.0/20 ')
+        ->toContain('fail2ban-client reload')
+        ->toContain("unban=('203.0.113.9')")
+        ->not->toContain('systemctl restart fail2ban')
+        ->not->toContain('apt-get')
+        ->and($server->tasks()->first()->name)->toBe('Updating the addresses fail2ban never bans');
+});
+
+test('servers without fail2ban are left alone when trusted addresses change', function () {
+    $shell = fakeShell();
+    $server = Server::factory()->create();
+
+    app()->call([new UpdateFail2banTrustedAddresses($server), 'handle']);
+
+    expect($shell->lastScript())->toBe('');
 });

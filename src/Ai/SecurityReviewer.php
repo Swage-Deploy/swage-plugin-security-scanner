@@ -58,6 +58,10 @@ class SecurityReviewer implements Agent, HasStructuredOutput
         Don't report something as a problem when the data shows it is handled, such as addresses fail2ban has banned or
         that are blocked. Swage's own SSH logins are not counted, and Cloudflare's addresses are never counted or blocked.
 
+        People trust the addresses and ranges under trusted_addresses, such as their office's. The scanner doesn't count
+        them and fail2ban never bans them, by choice. Don't report anything about them, such as their logins under recent
+        logins, and don't suggest blocking or banning them.
+
         Only events counted as "SSH logins" are logins that succeeded. Every other SSH count is a failed attempt, and the
         usernames under an address's targets are the names it tried, which need not exist: they don't show accounts on
         the server. The snapshot's accounts sections are what exists.

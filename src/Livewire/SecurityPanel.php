@@ -26,16 +26,19 @@ use Swage\SecurityScanner\Jobs\InstallFail2ban;
 use Swage\SecurityScanner\Jobs\ReviewServerSecurity;
 use Swage\SecurityScanner\Jobs\ScanServerLogs;
 use Swage\SecurityScanner\Jobs\UnblockAddress;
+use Swage\SecurityScanner\Jobs\UpdateFail2banTrustedAddresses;
 use Swage\SecurityScanner\Models\AiReview;
 use Swage\SecurityScanner\Models\BlockedAddress;
 use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
+use Swage\SecurityScanner\Models\TrustedAddress;
 
 /**
  * The security scanner's panel on a server's Plugins tab: whether scanning is on, open SSH login alerts, the busiest
- * hostile addresses of the last day, the addresses blocked in the firewall, fail2ban, and the AI review.
+ * hostile addresses of the last day, the addresses blocked in the firewall, trusted addresses, fail2ban, and the AI
+ * review.
  */
 class SecurityPanel extends Component
 {
@@ -61,6 +64,10 @@ class SecurityPanel extends Component
     public string $ip = '';
 
     public string $reason = '';
+
+    public string $trustIp = '';
+
+    public string $trustNote = '';
 
     public function mount(): void
     {
@@ -261,6 +268,10 @@ class SecurityPanel extends Component
             throw ValidationException::withMessages(['ip' => __('This is the address you are using Swage from.')]);
         }
 
+        if (TrustedAddress::covers(TrustedAddress::rangesFor($this->server->id), $validated['ip'])) {
+            throw ValidationException::withMessages(['ip' => __(':ip is trusted on this server. Stop trusting it first.', ['ip' => $validated['ip']])]);
+        }
+
         $address = BlockedAddress::firstOrNew(['server_id' => $this->server->id, 'ip' => $validated['ip']]);
 
         if ($address->exists && $address->status !== ResourceStatus::Failed) {
@@ -300,6 +311,106 @@ class SecurityPanel extends Component
         $address->update(['status' => ResourceStatus::Removing]);
 
         UnblockAddress::dispatch($address);
+    }
+
+    /**
+     * Trust an address or range on the server, from an alert or the trust form. What the scanner recorded about it is
+     * cleared, its open alerts are resolved, it is unblocked, and fail2ban stops banning it.
+     *
+     * @throws ValidationException
+     */
+    public function trust(?string $ip = null, ?string $note = null): void
+    {
+        $this->authorize('update', $this->server);
+
+        if ($ip !== null) {
+            $this->trustIp = $ip;
+            $this->trustNote = (string) $note;
+        }
+
+        $validated = $this->validate([
+            'trustIp' => ['required', 'string', 'max:64'],
+            'trustNote' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $range = TrustedAddress::normalize($validated['trustIp']);
+
+        if ($range === null) {
+            throw ValidationException::withMessages(['trustIp' => __('Enter an address, such as 203.0.113.7, or a range no wider than /:ipv4 for IPv4 or /:ipv6 for IPv6, such as 203.0.113.0/24.', ['ipv4' => TrustedAddress::MIN_IPV4_PREFIX, 'ipv6' => TrustedAddress::MIN_IPV6_PREFIX])]);
+        }
+
+        $address = TrustedAddress::firstOrNew(['server_id' => $this->server->id, 'ip' => $range]);
+
+        if ($address->exists) {
+            throw ValidationException::withMessages(['trustIp' => __(':ip is already trusted.', ['ip' => $range])]);
+        }
+
+        $address->fill(['note' => filled($validated['trustNote']) ? $validated['trustNote'] : null, 'trusted_by_id' => auth()->id()])->save();
+
+        $this->forget([$range]);
+
+        UpdateFail2banTrustedAddresses::dispatch($this->server);
+
+        $this->reset('trustIp', 'trustNote');
+        unset($this->trustedAddresses, $this->blocked);
+        Flux::modal('security-scanner-trust')->close();
+        Flux::toast(variant: 'success', text: __('Trusting :ip. It won\'t be counted, alerted on, blocked or banned.', ['ip' => $range]));
+    }
+
+    /**
+     * Trust the address an alert is about, such as one of your own logins.
+     *
+     * @throws ValidationException
+     */
+    public function trustFromAlert(int $alertId): void
+    {
+        $alert = SecurityAlert::query()->where('server_id', $this->server->id)->findOrFail($alertId);
+
+        $this->trust($alert->subject, $alert->rule->title());
+    }
+
+    public function untrust(int $addressId): void
+    {
+        $this->authorize('update', $this->server);
+
+        TrustedAddress::query()->where('server_id', $this->server->id)->findOrFail($addressId)->delete();
+
+        UpdateFail2banTrustedAddresses::dispatch($this->server);
+
+        unset($this->trustedAddresses);
+    }
+
+    /**
+     * Clear what the scanner recorded about the given ranges, resolve their open alerts and unblock them.
+     *
+     * @param  list<string>  $ranges
+     */
+    protected function forget(array $ranges): void
+    {
+        $covered = fn (?string $ip): bool => TrustedAddress::covers($ranges, $ip);
+
+        $ips = SecurityEvent::query()->where('server_id', $this->server->id)->whereNotNull('ip')->distinct()->pluck('ip')->filter($covered);
+        SecurityEvent::query()->where('server_id', $this->server->id)->whereIn('ip', $ips)->delete();
+
+        SecurityAlert::query()->where('server_id', $this->server->id)->open()->get()
+            ->filter(fn (SecurityAlert $alert): bool => $covered($alert->subject))
+            ->each(fn (SecurityAlert $alert) => $alert->resolve(auth()->user()));
+
+        BlockedAddress::query()->where('server_id', $this->server->id)->where('status', '!=', ResourceStatus::Removing)->get()
+            ->filter(fn (BlockedAddress $address): bool => $covered($address->ip))
+            ->each(function (BlockedAddress $address) {
+                $address->update(['status' => ResourceStatus::Removing]);
+                UnblockAddress::dispatch($address);
+            });
+    }
+
+    /**
+     * @return Collection<int, TrustedAddress>
+     */
+    #[Computed]
+    public function trustedAddresses(): Collection
+    {
+        return TrustedAddress::query()->where('server_id', $this->server->id)->with('trustedBy')->orderBy('ip')->get();
     }
 
     public function installFail2ban(): void

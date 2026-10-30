@@ -80,6 +80,7 @@
                                     @if (! $this->blocked->contains('ip', $alert->subject))
                                         <flux:button size="sm" variant="ghost" icon="no-symbol" wire:click="blockFromAlert({{ $alert->id }})" wire:confirm.danger="{{ __('Block :ip from SSH and every site on this server?', ['ip' => $alert->subject]) }}" :tooltip="__('Block in the firewall')" />
                                     @endif
+                                    <flux:button size="sm" variant="ghost" icon="shield-check" wire:click="trustFromAlert({{ $alert->id }})" wire:confirm="{{ __('Trust :ip? It won\'t be counted, alerted on, blocked or banned by fail2ban, and the AI review will leave it out.', ['ip' => $alert->subject]) }}" :tooltip="__('Trust')" />
                                     <flux:button size="sm" variant="ghost" icon="check" wire:click="resolve({{ $alert->id }})" :tooltip="__('Resolve')" />
                                 @endif
                             </flux:table.cell>
@@ -136,6 +137,48 @@
                 @empty
                     <flux:table.row>
                         <flux:table.cell colspan="5">{{ __('No addresses are blocked.') }}</flux:table.cell>
+                    </flux:table.row>
+                @endforelse
+            </flux:table.rows>
+        </flux:table>
+    </x-panel>
+
+    <x-panel icon="shield-check" :heading="__('Trusted addresses')" :description="__('Addresses and ranges you trust, such as your office\'s. They\'re never counted, alerted on or blocked, fail2ban never bans them, and the AI review leaves them out.')" flush>
+        @if ($canManage)
+            <x-slot:actions>
+                <flux:modal.trigger name="security-scanner-trust">
+                    <flux:button size="sm" icon="plus">{{ __('Trust address') }}</flux:button>
+                </flux:modal.trigger>
+            </x-slot:actions>
+        @endif
+
+        <flux:table>
+            <flux:table.columns>
+                <flux:table.column>{{ __('Address') }}</flux:table.column>
+                <flux:table.column>{{ __('Note') }}</flux:table.column>
+                <flux:table.column>{{ __('Trusted') }}</flux:table.column>
+                <flux:table.column></flux:table.column>
+            </flux:table.columns>
+            <flux:table.rows>
+                @forelse ($this->trustedAddresses as $trusted)
+                    <flux:table.row :key="'trusted-'.$trusted->id">
+                        <flux:table.cell class="font-mono text-xs">{{ $trusted->ip }}</flux:table.cell>
+                        <flux:table.cell class="max-w-md truncate">{{ $trusted->note ?? '—' }}</flux:table.cell>
+                        <flux:table.cell>
+                            {{ $trusted->created_at->diffForHumans() }}
+                            @if ($trusted->trustedBy)
+                                <flux:text class="text-xs">{{ __('by :name', ['name' => $trusted->trustedBy->name]) }}</flux:text>
+                            @endif
+                        </flux:table.cell>
+                        <flux:table.cell align="end">
+                            @if ($canManage)
+                                <flux:button size="sm" variant="ghost" icon="trash" wire:click="untrust({{ $trusted->id }})" wire:confirm="{{ __('Stop trusting :ip? It will be counted again, and fail2ban can ban it.', ['ip' => $trusted->ip]) }}" :tooltip="__('Stop trusting')" />
+                            @endif
+                        </flux:table.cell>
+                    </flux:table.row>
+                @empty
+                    <flux:table.row>
+                        <flux:table.cell colspan="4">{{ __('No addresses are trusted.') }}</flux:table.cell>
                     </flux:table.row>
                 @endforelse
             </flux:table.rows>
@@ -333,6 +376,23 @@
             </div>
             <pre class="max-h-[60vh] overflow-auto rounded-lg bg-zinc-50 p-4 font-mono text-xs whitespace-pre-wrap break-words text-zinc-800 dark:bg-white/5 dark:text-zinc-200">{{ $reviewInput ?: __('This review was made before Swage kept what reviews were sent.') }}</pre>
         </div>
+    </flux:modal>
+
+    <flux:modal name="security-scanner-trust" class="w-full max-w-lg">
+        <form wire:submit="trust" class="flex flex-col gap-6">
+            <div>
+                <flux:heading size="lg">{{ __('Trust address') }}</flux:heading>
+                <flux:text class="mt-1">{{ __('What the scanner recorded about it is cleared, it\'s unblocked, and fail2ban lifts any ban on it.') }}</flux:text>
+            </div>
+            <flux:input wire:model="trustIp" :label="__('IP address or range')" placeholder="203.0.113.0/24" class="font-mono" required />
+            <flux:input wire:model="trustNote" :label="__('Note')" :placeholder="__('Optional, such as Office')" />
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
+                </flux:modal.close>
+                <flux:button type="submit" variant="primary">{{ __('Trust') }}</flux:button>
+            </div>
+        </form>
     </flux:modal>
 
     <flux:modal name="security-scanner-block" class="w-full max-w-lg">

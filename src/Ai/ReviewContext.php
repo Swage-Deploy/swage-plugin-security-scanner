@@ -9,6 +9,7 @@ use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
+use Swage\SecurityScanner\Models\TrustedAddress;
 
 /**
  * What the AI review is given about a server: what the scanner recorded, read from Swage's database, and the
@@ -69,6 +70,8 @@ class ReviewContext
                 'last_scan_error' => $state->last_error,
                 'swage_connects_from' => $state->panel_address,
             ],
+            'trusted_addresses' => TrustedAddress::query()->where('server_id', $serverId)->orderBy('ip')->get()
+                ->map(fn (TrustedAddress $address): array => ['address' => $address->ip, 'note' => $address->note])->all(),
             'events_last_24_hours' => $this->totals($serverId),
             'events_per_day_last_7_days' => $this->daily($serverId),
             'busiest_hostile_addresses_last_24_hours' => $this->addresses($state),

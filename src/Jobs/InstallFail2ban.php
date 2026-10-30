@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Models\ScannerState;
+use Swage\SecurityScanner\Models\TrustedAddress;
 
 /**
  * Installs fail2ban to ban addresses that keep failing to log in over SSH: an hour's ban after five failures in an
@@ -20,7 +21,8 @@ use Swage\SecurityScanner\Models\ScannerState;
  * Cloudflare are banned too. Running it again updates the jails.
  *
  * Swage's own address is never banned, since that would lock Swage out of the server. It is taken from the SSH
- * connection the install runs over, as well as the address the scanner last saw Swage connect from.
+ * connection the install runs over, as well as the address the scanner last saw Swage connect from. The addresses
+ * people trust on the server are never banned either.
  */
 class InstallFail2ban implements ShouldBeUnique, ShouldQueue
 {
@@ -65,7 +67,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         $action = self::NGINX_ACTION;
         $nginxAction = $this->nginxAction();
         $panelAddress = self::PANEL_ADDRESS;
-        $ignore = $this->ignored();
+        $ignore = self::ignoreList($this->server);
 
         $runTask->run($this->server, 'Installing fail2ban', <<<BASH
         set -Eeuo pipefail
@@ -135,7 +137,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
     protected function probesJail(): string
     {
         $maxRetry = (int) config('security-scanner.fail2ban_probes');
-        $ignore = $this->ignored(CloudflareAddresses::ranges());
+        $ignore = self::probesIgnoreList($this->server);
         $jail = self::PROBES_JAIL;
 
         return implode("\n", [
@@ -159,21 +161,27 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * The addresses a jail never bans: the server itself, Swage, and any others given.
-     *
-     * @param  list<string>  $others
+     * The addresses the jails never ban: the server itself, Swage, and the addresses trusted on the server.
      */
-    protected function ignored(array $others = []): string
+    public static function ignoreList(Server $server): string
     {
-        $known = ScannerState::for($this->server)->panel_address;
+        $known = ScannerState::for($server)->panel_address;
 
         return implode(' ', array_filter([
             '127.0.0.1/8',
             '::1',
             self::PANEL_ADDRESS,
             filter_var($known, FILTER_VALIDATE_IP) ? $known : null,
-            ...$others,
+            ...TrustedAddress::rangesFor($server->id),
         ]));
+    }
+
+    /**
+     * The addresses the probes jail never bans, which sets its own list to add Cloudflare's.
+     */
+    public static function probesIgnoreList(Server $server): string
+    {
+        return implode(' ', [self::ignoreList($server), ...CloudflareAddresses::ranges()]);
     }
 
     /**
