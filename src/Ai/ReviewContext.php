@@ -71,7 +71,7 @@ class ReviewContext
                 'swage_connects_from' => $state->panel_address,
             ],
             'trusted_addresses' => TrustedAddress::query()->where('server_id', $serverId)->orderBy('ip')->get()
-                ->map(fn (TrustedAddress $address): array => ['address' => $address->ip, 'note' => $address->note])->all(),
+                ->map(fn (TrustedAddress $address): array => ['address' => $address->ip, 'note' => $address->swage_host ? 'Swage Host' : $address->note])->all(),
             'events_last_24_hours' => $this->totals($serverId),
             'events_per_day_last_7_days' => $this->daily($serverId),
             'busiest_hostile_addresses_last_24_hours' => $this->addresses($state),

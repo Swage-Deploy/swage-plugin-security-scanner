@@ -966,6 +966,47 @@ test('changing trusted addresses rewrites fail2ban\'s ignore lists, reloads it a
         ->and($server->tasks()->first()->name)->toBe('Updating the addresses fail2ban never bans');
 });
 
+test('the address swage connects from is trusted as the swage host, follows swage when it moves, and can\'t be removed', function () {
+    Queue::fake();
+    $server = Server::factory()->create();
+    TrustedAddress::create(['server_id' => $server->id, 'ip' => '198.51.100.9', 'note' => 'Office', 'trusted_by_id' => $server->user->id]);
+
+    scannedServer(client: '198.51.100.1');
+    scan($server);
+
+    $host = TrustedAddress::where('swage_host', true)->sole();
+    expect($host->ip)->toBe('198.51.100.1')
+        ->and(InstallFail2ban::ignoreList($server))->toBe('127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 198.51.100.1 198.51.100.9');
+    Queue::assertPushed(UpdateFail2banTrustedAddresses::class, 1);
+
+    scannedServer(client: '198.51.100.1');
+    scan($server);
+    Queue::assertPushed(UpdateFail2banTrustedAddresses::class, 1);
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('Swage Host')
+        ->call('untrust', $host->id)
+        ->assertNotFound();
+
+    expect($host->fresh())->not->toBeNull();
+
+    scannedServer(client: '198.51.100.9');
+    scan($server);
+
+    expect(TrustedAddress::orderBy('ip')->get(['ip', 'note', 'swage_host'])->toArray())->toBe([
+        ['ip' => '198.51.100.9', 'note' => 'Office', 'swage_host' => true],
+    ]);
+
+    scannedServer(client: '2001:db8::1');
+    scan($server);
+
+    expect(TrustedAddress::orderBy('ip')->get(['ip', 'note', 'swage_host'])->toArray())->toBe([
+        ['ip' => '198.51.100.9', 'note' => 'Office', 'swage_host' => false],
+        ['ip' => '2001:db8::1', 'note' => null, 'swage_host' => true],
+    ]);
+    Queue::assertPushed(UpdateFail2banTrustedAddresses::class, 3);
+});
+
 test('servers without fail2ban are left alone when trusted addresses change', function () {
     $shell = fakeShell();
     $server = Server::factory()->create();

@@ -373,7 +373,7 @@ class SecurityPanel extends Component
     {
         $this->authorize('update', $this->server);
 
-        TrustedAddress::query()->where('server_id', $this->server->id)->findOrFail($addressId)->delete();
+        TrustedAddress::query()->where('server_id', $this->server->id)->where('swage_host', false)->findOrFail($addressId)->delete();
 
         UpdateFail2banTrustedAddresses::dispatch($this->server);
 

@@ -7,6 +7,7 @@ use App\Ssh\RemoteShell;
 use RuntimeException;
 use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Jobs\BlockAddress;
+use Swage\SecurityScanner\Jobs\UpdateFail2banTrustedAddresses;
 use Swage\SecurityScanner\Models\BlockedAddress;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\TrustedAddress;
@@ -47,6 +48,10 @@ class LogScanner
 
         foreach ($output->files as $file) {
             array_push($events, ...$this->nginxParser->parse($file->lines(), $file->source()));
+        }
+
+        if (TrustedAddress::trustSwageHost($state->server_id, $panelAddress)) {
+            UpdateFail2banTrustedAddresses::dispatch($state->server);
         }
 
         $trusted = TrustedAddress::rangesFor($state->server_id);

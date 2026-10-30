@@ -111,6 +111,8 @@ A trusted address:
 - **is never banned by fail2ban.** It's added to every jail's `ignoreip`. When trusted addresses change, Swage rewrites the `ignoreip` lines in `/etc/fail2ban/jail.d/swage.conf` and `swage-probes.conf`, runs `fail2ban-client reload`, which keeps its bans and the failures it has counted, and lifts any ban on a trusted address. This shows in the server's activity log. Installing or updating fail2ban includes them too.
 - **is left out of the AI review.** The review is sent the trusted addresses and their notes, and told not to report anything about them, such as their logins under recent logins.
 
+The address Swage connects to the server from is always trusted, with the note **Swage Host**, and can't be removed. Each scan checks it, and if Swage starts connecting from a new address, such as after moving Swage to a new host, the new one is trusted in its place. An address you had trusted yourself before Swage used it stays trusted when Swage moves away.
+
 Stopping trusting an address takes it out of fail2ban's `ignoreip` again. What the scanner cleared isn't restored, and it's counted again from the next scan.
 
 ## AI review

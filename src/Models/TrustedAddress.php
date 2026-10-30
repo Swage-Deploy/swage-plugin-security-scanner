@@ -13,9 +13,11 @@ use Symfony\Component\HttpFoundation\IpUtils;
 /**
  * An address, or a range such as 203.0.113.0/24, people trust on a server, such as an office's. The scanner never
  * counts or alerts on it, it can't be blocked, fail2ban never bans it, and the AI review leaves it out.
+ *
+ * The address Swage connects to the server from is always trusted, marked as the Swage host, and can't be removed.
  */
 #[Table('security_scanner_trusted_addresses')]
-#[Fillable(['server_id', 'ip', 'note', 'trusted_by_id'])]
+#[Fillable(['server_id', 'ip', 'note', 'swage_host', 'trusted_by_id'])]
 class TrustedAddress extends Model
 {
     /**
@@ -24,6 +26,34 @@ class TrustedAddress extends Model
     public const int MIN_IPV4_PREFIX = 16;
 
     public const int MIN_IPV6_PREFIX = 32;
+
+    /**
+     * Trust the address Swage connects to a server from in place of the one it used before. An address someone had
+     * trusted themselves stays trusted when Swage moves away from it.
+     *
+     * @return bool Whether the trusted addresses changed.
+     */
+    public static function trustSwageHost(int $serverId, ?string $ip): bool
+    {
+        if (! filter_var($ip, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+
+        $ip = (string) inet_ntop((string) inet_pton($ip));
+        $current = static::query()->where('server_id', $serverId)->where('swage_host', true)->get();
+
+        if ($current->count() === 1 && $current->first()->ip === $ip) {
+            return false;
+        }
+
+        $current->reject(fn (self $address): bool => $address->ip === $ip)->each(fn (self $address) => $address->trusted_by_id
+            ? $address->update(['swage_host' => false])
+            : $address->delete());
+
+        static::query()->updateOrCreate(['server_id' => $serverId, 'ip' => $ip], ['swage_host' => true]);
+
+        return true;
+    }
 
     /**
      * The addresses and ranges trusted on a server.
@@ -81,6 +111,16 @@ class TrustedAddress extends Model
         }
 
         return inet_ntop($network).'/'.(int) $prefix;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'swage_host' => 'boolean',
+        ];
     }
 
     /**

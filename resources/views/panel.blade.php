@@ -163,7 +163,7 @@
                 @forelse ($this->trustedAddresses as $trusted)
                     <flux:table.row :key="'trusted-'.$trusted->id">
                         <flux:table.cell class="font-mono text-xs">{{ $trusted->ip }}</flux:table.cell>
-                        <flux:table.cell class="max-w-md truncate">{{ $trusted->note ?? '—' }}</flux:table.cell>
+                        <flux:table.cell class="max-w-md truncate">{{ $trusted->swage_host ? __('Swage Host') : ($trusted->note ?? '—') }}</flux:table.cell>
                         <flux:table.cell>
                             {{ $trusted->created_at->diffForHumans() }}
                             @if ($trusted->trustedBy)
@@ -171,7 +171,11 @@
                             @endif
                         </flux:table.cell>
                         <flux:table.cell align="end">
-                            @if ($canManage)
+                            @if ($trusted->swage_host)
+                                <flux:tooltip :content="__('Swage connects to this server from here, so it\'s always trusted.')">
+                                    <flux:icon.lock-closed variant="micro" class="me-2 inline text-zinc-400" />
+                                </flux:tooltip>
+                            @elseif ($canManage)
                                 <flux:button size="sm" variant="ghost" icon="trash" wire:click="untrust({{ $trusted->id }})" wire:confirm="{{ __('Stop trusting :ip? It will be counted again, and fail2ban can ban it.', ['ip' => $trusted->ip]) }}" :tooltip="__('Stop trusting')" />
                             @endif
                         </flux:table.cell>

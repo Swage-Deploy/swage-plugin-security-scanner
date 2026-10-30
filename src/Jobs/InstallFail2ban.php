@@ -172,13 +172,13 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
     {
         $known = ScannerState::for($server)->panel_address;
 
-        return implode(' ', array_filter([
+        return implode(' ', array_unique(array_filter([
             '127.0.0.1/8',
             '::1',
             self::PANEL_ADDRESS,
             filter_var($known, FILTER_VALIDATE_IP) ? $known : null,
             ...TrustedAddress::rangesFor($server->id),
-        ]));
+        ])));
     }
 
     /**
