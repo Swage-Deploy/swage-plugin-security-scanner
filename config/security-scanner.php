@@ -7,9 +7,10 @@ return [
     // How many days of counted events are kept. Alerts are kept until 90 days after they are resolved.
     'retention_days' => (int) env('SECURITY_SCANNER_RETENTION_DAYS', 14),
 
-    // How many probes from one address within an hour make fail2ban ban it from the sites. Servers pick up a change
-    // when fail2ban is installed or updated from the panel.
-    'fail2ban_probes' => (int) env('SECURITY_SCANNER_HTTP_PROBES', 20),
+    // How many failed SSH logins, and how many probes for vulnerable files, from one address within a day make fail2ban
+    // ban it for good. Servers pick up a change when fail2ban is installed or updated from the panel.
+    'fail2ban_ssh' => (int) env('SECURITY_SCANNER_SSH_FAILURES', 10),
+    'fail2ban_probes' => (int) env('SECURITY_SCANNER_HTTP_PROBES', 5),
 
     // The AI review, which sends what the scanner recorded and a read-only snapshot of each server's setup to the
     // OpenAI compatible API set on the plugin's config page, and stores the findings it suggests. It never changes a
@@ -25,10 +26,11 @@ return [
         'retention_days' => (int) env('SECURITY_SCANNER_AI_RETENTION_DAYS', 30),
     ],
 
-    // Requests for paths matching these patterns are counted as probing. Laravel sites only serve index.php, so
-    // requests for other PHP scripts, dotfiles and well known admin tools are almost always scanners.
+    // Requests for paths matching these patterns are counted as probing. No visitor asks a Laravel site for dotfiles,
+    // dependencies or well known admin tools, so these are scanners.
     'probes' => [
-        '~/\.(env|git|svn|hg|aws|ssh|docker|vscode|idea|DS_Store|htpasswd|htaccess)~i',
+        '~/\.(env|git|svn|hg|aws|ssh|docker|vscode|idea|DS_Store|htpasswd|htaccess|npmrc)~i',
+        '~/node_modules/~i',
         '~/wp-(admin|login|content|includes|config)~i',
         '~/xmlrpc\.php~i',
         '~/(phpmyadmin|pma|myadmin|adminer|phpinfo)~i',
@@ -37,7 +39,13 @@ return [
         '~/(cgi-bin|boaform|HNAP1|actuator|solr|server-status|_ignition)~i',
         '~(\.\./|%2e%2e)~i',
         '~/etc/(passwd|shadow)~i',
-        '~\.(sql|bak|old|swp|tar|gz|zip|7z|rar)(\?|$)~i',
-        '~/(?!index\.php)[^/?]+\.php~i',
+    ],
+
+    // Requests for paths matching these patterns are only counted as probing when they fail with a 403 or 404. Scanners
+    // guess at backups and PHP scripts that aren't there, but a site can serve real downloads or an old script, and
+    // visitors to those shouldn't be banned. They can't match a space or quote, so fail2ban matches them the same way.
+    'probes_when_failed' => [
+        '~\.(sql|bak|old|swp|tar|gz|zip|7z|rar)(?=[?\s"]|$)~i',
+        '~/(?!index\.php)[^/?\s"]+\.php~i',
     ],
 ];

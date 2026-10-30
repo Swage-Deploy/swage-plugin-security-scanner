@@ -12,11 +12,11 @@ use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\TrustedAddress;
 
 /**
- * Installs fail2ban to ban addresses that keep failing to log in over SSH: an hour's ban after five failures in an
- * hour, so attackers who pace their guesses are caught too, and a week's ban for addresses banned three times in a day.
+ * Installs fail2ban to ban addresses for good once they fail to log in over SSH ten times in a day, counted over a day
+ * so attackers who pace their guesses are caught too.
  *
- * On servers with nginx it also bans addresses probing for vulnerable files from the sites for an hour, using the
- * scanner's own probe patterns, and they count towards the week's ban too. Bans from the probes and recidive jails
+ * On servers with nginx it also bans addresses for good from the sites once they probe for vulnerable files five times
+ * in a day, using the scanner's own probe patterns. Bans from the probes and recidive jails
  * are also denied in nginx, which takes the visitor's address from Cloudflare, so visitors to sites proxied by
  * Cloudflare are banned too. Running it again updates the jails.
  *
@@ -68,6 +68,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         $nginxAction = $this->nginxAction();
         $panelAddress = self::PANEL_ADDRESS;
         $ignore = self::ignoreList($this->server);
+        $sshRetry = (int) config('security-scanner.fail2ban_ssh');
 
         $runTask->run($this->server, 'Installing fail2ban', <<<BASH
         set -Eeuo pipefail
@@ -89,11 +90,14 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         maxretry = 5
         backend = systemd
 
-        # Attackers pace their guesses to stay under five in ten minutes, so SSH failures are counted over an hour.
+        # Attackers pace their guesses to stay under a jail's limit, so SSH failures are counted over a day, and the
+        # addresses behind them are banned for good. fail2ban keeps permanent bans in its database across restarts.
         [sshd]
         enabled = true
         port = {$port}
-        findtime = 1h
+        findtime = 1d
+        maxretry = {$sshRetry}
+        bantime = -1
 
         # recidive reads the bans fail2ban writes to its own log file, which isn't in the journal.
         [recidive]
@@ -127,7 +131,7 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
         echo "fail2ban is installed."
         BASH);
 
-        ScannerState::for($this->server)->update(['fail2ban_installed' => true, 'fail2ban_ignores_panel' => true, 'fail2ban_recidive_reads_log' => true, 'fail2ban_sshd_counts_hour' => true]);
+        ScannerState::for($this->server)->update(['fail2ban_installed' => true, 'fail2ban_ignores_panel' => true, 'fail2ban_recidive_reads_log' => true, 'fail2ban_sshd_counts_hour' => true, 'fail2ban_bans_permanently' => true]);
     }
 
     /**
@@ -147,8 +151,9 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
             "filter = {$jail}",
             'logpath = /var/log/nginx/*access.log',
             'backend = auto',
-            'findtime = 1h',
+            'findtime = 1d',
             "maxretry = {$maxRetry}",
+            'bantime = -1',
             "ignoreip = {$ignore}",
             '# Ban in nginx as well as the firewall, which never sees visitors to sites proxied by Cloudflare.',
             'action = %(action_)s',
@@ -205,24 +210,33 @@ class InstallFail2ban implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * The probes filter takes the path from each request in nginx's combined format, then matches it against the
-     * scanner's probe patterns. fail2ban removes the date from a line before matching it, leaving empty brackets.
+     * The probes filter takes the path from each request in nginx's combined format, up to its response status, then
+     * matches it against the scanner's probe patterns. Patterns only counted when a request fails also need the status
+     * to be 403 or 404. fail2ban removes the date from a line before matching it, leaving empty brackets.
      */
     protected function probesFilter(): string
     {
         $patterns = collect(config('security-scanner.probes'))
-            ->map(function (string $pattern): string {
-                preg_match('/^(.)(.*)\1([a-z]*)$/s', $pattern, $parts);
-                $regex = str_replace('%', '%%', $parts[2]);
-
-                return str_contains($parts[3], 'i') ? "(?i:{$regex})" : $regex;
-            })
+            ->map(fn (string $pattern): string => $this->fail2banRegex($pattern))
+            ->merge(collect(config('security-scanner.probes_when_failed'))
+                ->map(fn (string $pattern): string => $this->fail2banRegex($pattern).'[^"]*" 40[34]$'))
             ->implode("\n            ");
 
         return implode("\n", [
             '[Definition]',
-            'prefregex = ^<HOST> \S+ \S+ \[\] "[A-Z]+ <F-CONTENT>[^ "]+</F-CONTENT>',
+            'prefregex = ^<HOST> \S+ \S+ \[\] "[A-Z]+ <F-CONTENT>[^ "]+[^"]*" \d{3}</F-CONTENT>',
             "failregex = {$patterns}",
         ]);
+    }
+
+    /**
+     * Turn one of the scanner's PHP patterns into a regex for fail2ban's config, which treats % as special.
+     */
+    protected function fail2banRegex(string $pattern): string
+    {
+        preg_match('/^(.)(.*)\1([a-z]*)$/s', $pattern, $parts);
+        $regex = str_replace('%', '%%', $parts[2]);
+
+        return str_contains($parts[3], 'i') ? "(?i:{$regex})" : $regex;
     }
 }

@@ -56,6 +56,14 @@ class NginxAccessParser
             }
         }
 
+        if (in_array($status, [403, 404], true)) {
+            foreach (config('security-scanner.probes_when_failed') as $pattern) {
+                if (preg_match($pattern, $path)) {
+                    return EventKind::HttpProbe;
+                }
+            }
+        }
+
         if ($method === 'POST' && preg_match('~/(login|signin|sign-in|auth/login)(\?|/|$)~i', $path)) {
             return EventKind::HttpLogin;
         }

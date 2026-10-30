@@ -33,17 +33,16 @@ The scanner is turned on per server, from the server's **Plugins** tab.
 
 2. **Turn it on** for each server under **Servers → *server* → Plugins → Security scanner**.
 
-3. Optionally, **install fail2ban** from the same panel. It bans an address:
+3. Optionally, **install fail2ban** from the same panel. It bans an address for good:
 
-   - from SSH for an hour after five failed logins in an hour,
-   - from the server's sites for an hour after 20 probes for vulnerable files (see below) in an hour,
-   - and from everything for a week once it has been banned three times in a day.
+   - from SSH after 10 failed logins in a day,
+   - from the server's sites after 5 probes for vulnerable files (see below) in a day.
 
-   Servers without nginx don't get the probes ban. No jail ever bans the address Swage connects from, so failed logins or probes from it cannot lock Swage out. The address is taken from Swage's SSH connection when fail2ban is installed. If fail2ban was installed by an earlier version of the plugin, without the probes ban, without leaving Swage's address alone, with a week long ban that never applied, or counting failed SSH logins over only ten minutes, the panel offers **Update fail2ban**. The week long ban reads the bans fail2ban writes to `/var/log/fail2ban.log`. Earlier versions read the journal instead, where those bans never appear, so addresses came back every hour. Counting over ten minutes let attackers who pace their guesses, a few every ten minutes all day, go unbanned.
+   fail2ban keeps permanent bans in its database, so they last through restarts. To let a banned address back in, trust it (see below), which lifts its ban. Servers without nginx don't get the probes ban. No jail ever bans the address Swage connects from, so failed logins or probes from it cannot lock Swage out. The address is taken from Swage's SSH connection when fail2ban is installed. If fail2ban was installed by an earlier version of the plugin, without the probes ban, without leaving Swage's address alone, with a week long ban that never applied, counting failed SSH logins over only ten minutes, or with bans that end after an hour, the panel offers **Update fail2ban**. Updating keeps the bans already in place, and their hour runs out as before. The week long ban reads the bans fail2ban writes to `/var/log/fail2ban.log`. Earlier versions read the journal instead, where those bans never appear, so addresses came back every hour. Counting over ten minutes let attackers who pace their guesses, a few every ten minutes all day, go unbanned.
 
 ## What it looks for
 
-The scanner counts failed and unknown-user SSH logins, failed sudo attempts, site login form submissions, denied requests, and probes for vulnerable files: requests for paths such as `/.env`, `/.git`, `/wp-login.php`, `/vendor/phpunit` or a PHP script other than `index.php`. These show in the panel's totals and busiest addresses, and fail2ban bans the addresses behind repeated SSH failures and probing.
+The scanner counts failed and unknown-user SSH logins, failed sudo attempts, site login form submissions, denied requests, and probes for vulnerable files: requests for paths such as `/.env`, `/.git`, `/node_modules`, `/wp-login.php` or `/vendor/phpunit`. Requests for backups and archives (`.sql`, `.zip`, `.bak` and the like) or a PHP script other than `index.php` only count when they fail with a 403 or 404, so visitors downloading a site's real files, or using an old script it still serves, aren't counted or banned. These show in the panel's totals and busiest addresses, and fail2ban bans the addresses behind repeated SSH failures and probing.
 
 Only SSH logins raise alerts:
 
@@ -60,14 +59,14 @@ The panel also shows totals for the last 24 hours, the busiest hostile addresses
 
 ### Banning probes with fail2ban
 
-The `swage-probes` jail reads every access log in `/var/log/nginx` and matches each request's path against the same patterns the scanner counts as probes. Cloudflare's addresses are never banned. When a new site's access log appears, the next scan reloads the jail so fail2ban reads it too.
+The `swage-probes` jail reads every access log in `/var/log/nginx` and matches each request's path, and its response status, against the same patterns the scanner counts as probes. Cloudflare's addresses are never banned. When a new site's access log appears, the next scan reloads the jail so fail2ban reads it too.
 
-Its bans, and the week long `recidive` bans, are applied in two places, like blocking an address:
+Its bans, and the `recidive` bans left from earlier versions, are applied in two places, like blocking an address:
 
 - **The firewall**, on ports 80 and 443 for `swage-probes` and every port for `recidive`.
 - **nginx**, with a `deny <address>;` line in `/etc/nginx/conf.d/swage-fail2ban-<jail>.conf`, followed by a reload. Visitors to sites proxied by Cloudflare connect from Cloudflare's addresses, so the firewall never sees them, but nginx takes the visitor's address from Cloudflare's header and gives them a 403.
 
-Each jail keeps its own file, so an hour's ban ending doesn't lift a week's ban of the same address. fail2ban empties the files when it stops and fills them again when it starts. nginx is only reloaded when its config passes `nginx -t`.
+Each jail keeps its own file, so one jail's ban ending doesn't lift another jail's ban of the same address. fail2ban empties the files when it stops and fills them again when it starts. nginx is only reloaded when its config passes `nginx -t`.
 
 ## How logs are read
 
@@ -137,7 +136,7 @@ That includes IP addresses and account names, so only use an API you trust with 
 
 The panel shows the latest review: a short summary, then each finding with its severity, what was seen and a suggestion. Suggestions can include shell commands. They come from a model and can be wrong, so check them before acting. Usernames and paths in the logs can be chosen by attackers, and the model is told to treat everything it's given as data, not instructions.
 
-The model is told that only events counted as SSH logins succeeded, and that the usernames attackers tried don't show which accounts exist, so failed attempts as made-up names like `admin` aren't reported as logins or unknown accounts. Busy hostile addresses that aren't banned or blocked are normal: most are scanners that come and go, and fail2ban bans them once they pass its limits and lifts the bans later. The model is told not to suggest blocking them by hand. It only reports hostile addresses when fail2ban is missing or not keeping up, when one address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in. Swage works out from the snapshot whether an SSH password guess could ever succeed: SSH must accept passwords on their own, and an account that can log in must have a usable password, with root also needing `PermitRootLogin yes`. It sends the answer to the model as `ssh_password_guesses`, with the accounts open to guessing. When no guess can succeed, the model is told to rate the guessing, and fail2ban not banning it, as low at most. It is also told not to suggest lowering fail2ban's limits for many addresses each guessing a few times, which would ban people who mistype.
+The model is told that only events counted as SSH logins succeeded, and that the usernames attackers tried don't show which accounts exist, so failed attempts as made-up names like `admin` aren't reported as logins or unknown accounts. Busy hostile addresses that aren't banned or blocked are normal: most are scanners that come and go, and fail2ban bans them once they pass its limits and lifts the bans later. The model is told not to suggest blocking them by hand. It only reports hostile addresses when fail2ban is missing or not keeping up, when one address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in. Swage works out from the snapshot whether an SSH password guess could ever succeed: SSH must accept passwords on their own, and an account that can log in must have a usable password, with root also needing `PermitRootLogin yes`. It sends the answer to the model as `ssh_password_guesses`, with the accounts open to guessing. When no guess can succeed, the model is told to rate the guessing, and fail2ban not banning it, as low at most. It is also told not to suggest lowering fail2ban's limits for many addresses each guessing a few times, which would ban people who mistype. Swage's own passwordless sudo rules, which only let its users reload PHP-FPM, restart their own daemons and, on the server Swage runs on, migrate or reboot it, aren't reported. Any other passwordless sudo rule, or one of Swage's widened with more commands or wildcards, still is.
 
 ### Ignoring a finding
 
@@ -149,7 +148,7 @@ Ignoring a finding doesn't stop reviews checking for it. Each finding has a shor
 
 A review that finds nothing should still show that it looked. Each review shows:
 
-- **Checked**: what the model says it looked at, one line per part of the snapshot and of the scanner's records, with what it saw, such as "SSH settings: password logins off, root login key only". The model is told to list these even when nothing needs attention. If a review has none, the panel says there's no sign it read the server.
+- **What was checked**: collapsed by default, what the model says it looked at, one line per part of the snapshot and of the scanner's records, with what it saw, such as "SSH settings: password logins off, root login key only". The model is told to list these even when nothing needs attention. If a review has none, the panel says there's no sign it read the server.
 - **The model and tokens**: the model you set, the model the API reports it used if that's different, and how many tokens it read and wrote. A review of a busy server that read only a few hundred tokens didn't get much.
 - **Parts that couldn't be read**: each part of the snapshot says when its command failed or isn't installed, as opposed to running and finding nothing. If any couldn't be read, the panel lists them, since anything wrong there wasn't checked.
 - **What was sent**: the exact data the model was given, for people who can manage the server. It includes the server's accounts and sudo rules, so viewers don't see it.
@@ -175,7 +174,8 @@ These can be set in Swage's `.env`:
 |---|---|---|
 | `SECURITY_SCANNER_INTERVAL` | `2` | Minutes between scans of each server. |
 | `SECURITY_SCANNER_RETENTION_DAYS` | `14` | Days of counted events to keep. |
-| `SECURITY_SCANNER_HTTP_PROBES` | `20` | Probes from one address in an hour before fail2ban bans it from the sites. Servers pick up a change when fail2ban is installed or updated. |
+| `SECURITY_SCANNER_SSH_FAILURES` | `10` | Failed SSH logins from one address in a day before fail2ban bans it for good. Servers pick up a change when fail2ban is installed or updated. |
+| `SECURITY_SCANNER_HTTP_PROBES` | `5` | Probes from one address in a day before fail2ban bans it from the sites for good. Servers pick up a change when fail2ban is installed or updated. |
 | `SECURITY_SCANNER_AI_INTERVAL_HOURS` | `6` | Hours between AI reviews of each server. |
 | `SECURITY_SCANNER_AI_TIMEOUT` | `120` | Seconds to wait for the API to answer. |
 | `SECURITY_SCANNER_AI_RETENTION_DAYS` | `30` | Days of AI reviews to keep. |

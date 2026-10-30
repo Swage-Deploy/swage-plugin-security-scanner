@@ -185,13 +185,16 @@
         </flux:table>
     </x-panel>
 
-    <x-panel icon="lock-closed" :heading="__('fail2ban')" :description="__('Bans addresses from SSH for an hour after five failed logins in an hour, and from sites for an hour after :count probes for vulnerable files in an hour, in nginx too, so visitors through Cloudflare are banned as well. Addresses banned three times in a day are banned for a week.', ['count' => config('security-scanner.fail2ban_probes')])">
+    <x-panel icon="lock-closed" :heading="__('fail2ban')" :description="__('Bans addresses for good from SSH after :ssh failed logins in a day, and from sites after :probes probes for vulnerable files in a day, in nginx too, so visitors through Cloudflare are banned as well. Trusting an address lifts its ban.', ['ssh' => config('security-scanner.fail2ban_ssh'), 'probes' => config('security-scanner.fail2ban_probes')])">
         @if ($this->state->fail2ban_installed)
             @if ($this->state->needsFail2banUpdate())
                 <flux:callout icon="arrow-path" color="amber" class="mb-4">
                     @if ($this->state->fail2banCanBanPanel())
                         <flux:callout.heading>{{ __('fail2ban could lock Swage out of this server') }}</flux:callout.heading>
                         <flux:callout.text>{{ __('It was installed before it left Swage\'s own address alone, so a few failed logins or probes from that address would ban Swage. Update it to exempt the address.') }}</flux:callout.text>
+                    @elseif ($this->state->fail2banBansTemporarily())
+                        <flux:callout.heading>{{ __('fail2ban lets banned addresses back in') }}</flux:callout.heading>
+                        <flux:callout.text>{{ __('It was installed before bans were permanent, so addresses come back once their ban ends. Update it to ban them for good after :ssh failed SSH logins or :probes probes in a day.', ['ssh' => config('security-scanner.fail2ban_ssh'), 'probes' => config('security-scanner.fail2ban_probes')]) }}</flux:callout.text>
                     @elseif ($this->state->fail2banMissesRepeatOffenders())
                         <flux:callout.heading>{{ __('fail2ban never bans addresses for a week') }}</flux:callout.heading>
                         <flux:callout.text>{{ __('Its recidive jail can\'t see fail2ban\'s bans, so addresses banned for an hour come back as soon as the ban ends. Update it to ban them for a week after three bans in a day.') }}</flux:callout.text>

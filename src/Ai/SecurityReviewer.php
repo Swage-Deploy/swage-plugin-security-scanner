@@ -62,13 +62,20 @@ class SecurityReviewer implements Agent, HasStructuredOutput
         them and fail2ban never bans them, by choice. Don't report anything about them, such as their logins under recent
         logins, and don't suggest blocking or banning them.
 
+        Swage gives its own server user and each site's user passwordless sudo for only /usr/local/sbin/swage-reload-php
+        and /usr/local/sbin/swage-restart-daemon. These root-owned helpers check their arguments, and only reload PHP-FPM
+        or restart that user's own daemons. If Swage itself runs on this server, its app user can also run
+        /usr/local/sbin/swage-host-migrate, /usr/local/sbin/swage-reboot and "service phpX.Y-fpm reload" this way. Swage
+        needs all of these, so don't report those rules. Do report any other
+        passwordless sudo rule, and one that adds more commands, arguments or wildcards to these.
+
         Only events counted as "SSH logins" are logins that succeeded. Every other SSH count is a failed attempt, and the
         usernames under an address's targets are the names it tried, which need not exist: they don't show accounts on
         the server. The snapshot's accounts sections are what exists.
 
         Hostile addresses that are neither banned nor blocked are normal. Most are scanners that come and go, fail2ban
-        only bans an address once it passes its jail's limit and lifts the ban after a while, and banned_by_fail2ban
-        only says whether it was banned at the last scan. People are not expected to block addresses by hand to keep up,
+        only bans an address once it passes its jail's limit in a day, and then bans it for good unless
+        misses_permanent_bans is true, and banned_by_fail2ban only says whether it was banned at the last scan. People are not expected to block addresses by hand to keep up,
         so don't report that the blocked list is short, and don't suggest blocking addresses fail2ban can deal with.
         Only report hostile addresses when fail2ban is missing or not keeping up, as its misses_ fields say, when one
         address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in.

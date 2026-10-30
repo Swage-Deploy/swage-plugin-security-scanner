@@ -99,6 +99,7 @@ class ReviewContext
                 'could_ban_swage' => $state->fail2banCanBanPanel(),
                 'misses_repeat_offenders' => $state->fail2banMissesRepeatOffenders(),
                 'misses_paced_ssh_guessing' => $state->fail2banMissesPacedSsh(),
+                'misses_permanent_bans' => $state->fail2banBansTemporarily(),
                 'misses_probes' => $state->fail2banMissesProbes(),
             ],
             'ignored_findings' => IgnoredFinding::query()->where('server_id', $serverId)->orderBy('key')->get()

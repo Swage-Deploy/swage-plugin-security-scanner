@@ -89,6 +89,8 @@ final readonly class ScanScript
             fail2ban-client status recidive 2>/dev/null | grep -q 'File list' && echo 'recidive-reads-log yes' || echo 'recidive-reads-log no'
             # Jails installed before SSH failures were counted over an hour miss attackers who pace their guesses.
             [ "\$(fail2ban-client get sshd findtime 2>/dev/null)" -ge 3600 ] 2>/dev/null && echo 'sshd-counts-hour yes' || echo 'sshd-counts-hour no'
+            # Jails installed before bans were permanent let addresses back in after an hour.
+            [ "\$(fail2ban-client get sshd bantime 2>/dev/null)" = '-1' ] && echo 'bans-permanently yes' || echo 'bans-permanently no'
             for jail in sshd recidive {$probesJail}; do
                 fail2ban-client status "\$jail" 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p'
             done
@@ -210,6 +212,11 @@ final readonly class ScanScript
         if (preg_match('/^sshd-counts-hour (yes|no)$/m', $rest, $sshd)) {
             $result->fail2banSshdCountsHour = $sshd[1] === 'yes';
             $rest = str_replace($sshd[0], '', $rest);
+        }
+
+        if (preg_match('/^bans-permanently (yes|no)$/m', $rest, $permanent)) {
+            $result->fail2banBansPermanently = $permanent[1] === 'yes';
+            $rest = str_replace($permanent[0], '', $rest);
         }
 
         if (preg_match('/^jails ?(.*)$/m', $rest, $jails)) {

@@ -241,6 +241,27 @@ test('only probes, login submissions, denied and missing requests are counted fr
     ])->and($events[0]->source)->toBe('example.com');
 });
 
+test('requests for backups and php scripts only count as probes when they fail', function () {
+    $events = app(NginxAccessParser::class)->parse(implode("\n", [
+        accessLine('203.0.113.9', 'GET /backup.zip HTTP/1.1', 404),
+        accessLine('203.0.113.9', 'GET /db.sql?download=1 HTTP/1.1', 403),
+        accessLine('203.0.113.9', 'GET /shell.php HTTP/1.1', 404),
+        accessLine('203.0.113.9', 'GET /node_modules/.package-lock.json HTTP/1.1', 200),
+        accessLine('203.0.113.9', 'GET /.npmrc HTTP/1.1', 200),
+        accessLine('203.0.113.10', 'GET /files/brochure.zip HTTP/1.1', 200),
+        accessLine('203.0.113.10', 'GET /download.php HTTP/1.1', 200),
+        accessLine('203.0.113.10', 'GET /photos.zip.html HTTP/1.1', 200),
+    ]), 'example.com');
+
+    expect(collect($events)->map(fn ($event) => [$event->kind, $event->target])->all())->toBe([
+        [EventKind::HttpProbe, '/backup.zip'],
+        [EventKind::HttpProbe, '/db.sql?download=1'],
+        [EventKind::HttpProbe, '/shell.php'],
+        [EventKind::HttpProbe, '/node_modules/.package-lock.json'],
+        [EventKind::HttpProbe, '/.npmrc'],
+    ]);
+});
+
 test('a scan counts events per address and hour, raises no alert for brute force attempts, and remembers where it stopped', function () {
     Event::fake([AlertRaised::class]);
     $server = Server::factory()->create();
@@ -395,6 +416,32 @@ test('servers whose sshd jail only counts failed logins over ten minutes are off
     expect(scan($server))
         ->fail2ban_sshd_counts_hour->toBeTrue()
         ->and(ScannerState::for($server)->needsFail2banUpdate())->toBeFalse();
+});
+
+test('servers whose fail2ban bans only last a while are offered an update', function () {
+    $server = Server::factory()->create();
+
+    scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel yes\nrecidive-reads-log yes\nsshd-counts-hour yes\nbans-permanently no\n203.0.113.9");
+    $state = scan($server);
+
+    expect($state)
+        ->fail2ban_bans_permanently->toBeFalse()
+        ->fail2ban_banned->toBe(['203.0.113.9'])
+        ->and($state->needsFail2banUpdate())->toBeTrue();
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('fail2ban lets banned addresses back in')
+        ->assertSee('Update fail2ban');
+
+    scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel yes\nrecidive-reads-log yes\nsshd-counts-hour yes\nbans-permanently yes\n203.0.113.9");
+
+    expect(scan($server))
+        ->fail2ban_bans_permanently->toBeTrue()
+        ->and(ScannerState::for($server)->needsFail2banUpdate())->toBeFalse();
+});
+
+test('the scan script asks whether fail2ban bans for good', function () {
+    expect((new ScanScript('@@M'))->render([]))->toContain('[ "$(fail2ban-client get sshd bantime 2>/dev/null)" = \'-1\' ] && echo \'bans-permanently yes\' || echo \'bans-permanently no\'');
 });
 
 test('the scan script asks whether fail2ban\'s sshd jail counts failed logins over an hour', function () {
@@ -590,11 +637,12 @@ test('fail2ban is installed with the server\'s ssh port', function () {
     app()->call([new InstallFail2ban($server), 'handle']);
 
     $shell->assertRan('apt-get install -yq -o DPkg::Lock::Timeout=300 fail2ban');
-    $shell->assertRan("[sshd]\nenabled = true\nport = 2222\nfindtime = 1h\n");
+    $shell->assertRan("[sshd]\nenabled = true\nport = 2222\nfindtime = 1d\nmaxretry = 10\nbantime = -1\n");
     $shell->assertRan("[recidive]\nenabled = true\nbackend = auto\nbantime = 1w");
-    $shell->assertRan("[swage-probes]\nenabled = true\nport = http,https\nfilter = swage-probes\nlogpath = /var/log/nginx/*access.log\nbackend = auto\nfindtime = 1h\nmaxretry = 20\n");
-    $shell->assertRan('prefregex = ^<HOST> \S+ \S+ \[\] "[A-Z]+ <F-CONTENT>[^ "]+</F-CONTENT>');
-    $shell->assertRan("failregex = (?i:/\.(env|git|svn|hg|aws|ssh|docker|vscode|idea|DS_Store|htpasswd|htaccess))\n            (?i:/wp-");
+    $shell->assertRan("[swage-probes]\nenabled = true\nport = http,https\nfilter = swage-probes\nlogpath = /var/log/nginx/*access.log\nbackend = auto\nfindtime = 1d\nmaxretry = 5\nbantime = -1\n");
+    $shell->assertRan('prefregex = ^<HOST> \S+ \S+ \[\] "[A-Z]+ <F-CONTENT>[^ "]+[^"]*" \d{3}</F-CONTENT>');
+    $shell->assertRan('(?i:\.(sql|bak|old|swp|tar|gz|zip|7z|rar)(?=[?\s"]|$))[^"]*" 40[34]$');
+    $shell->assertRan("failregex = (?i:/\.(env|git|svn|hg|aws|ssh|docker|vscode|idea|DS_Store|htpasswd|htaccess|npmrc))\n            (?i:/node_modules/)\n            (?i:/wp-");
     $shell->assertRan('(?i:(\.\./|%%2e%%2e))');
     $shell->assertRan('ignoreip = 127.0.0.1/8 ::1 @SWAGE_PANEL_ADDRESS@ 173.245.48.0/20');
     $shell->assertRan("action = %(action_)s\n         swage-nginx-deny\n\n[recidive]\naction = %(action_)s\n         swage-nginx-deny");
@@ -606,7 +654,8 @@ test('fail2ban is installed with the server\'s ssh port', function () {
         ->fail2ban_installed->toBeTrue()
         ->fail2ban_ignores_panel->toBeTrue()
         ->fail2ban_recidive_reads_log->toBeTrue()
-        ->fail2ban_sshd_counts_hour->toBeTrue();
+        ->fail2ban_sshd_counts_hour->toBeTrue()
+        ->fail2ban_bans_permanently->toBeTrue();
 });
 
 test('fail2ban never bans the address swage connects from', function () {
