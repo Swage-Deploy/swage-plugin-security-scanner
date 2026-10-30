@@ -62,6 +62,7 @@ class ReviewContext
 
         return [
             'reviewed_at' => now()->toIso8601String(),
+            'ssh_password_guesses' => $this->passwordGuesses($snapshot),
             'scanner' => [
                 'scanning_logs' => $state->enabled,
                 'last_scanned_at' => $state->last_scanned_at?->toIso8601String(),
@@ -103,6 +104,53 @@ class ReviewContext
                 ->mapWithKeys(fn (string $label, string $section): array => [$label => $snapshot[$section] ?? null])
                 ->all(),
         ];
+    }
+
+    /**
+     * Whether a failed SSH password guess could ever succeed, worked out from the snapshot rather than left to the
+     * model, which tends to rate guessing as serious even when nothing it guesses can work.
+     *
+     * @param  array<string, string>  $snapshot
+     * @return array<string, mixed>
+     */
+    protected function passwordGuesses(array $snapshot): array
+    {
+        $readable = fn (string $section): bool => ! in_array(trim($snapshot[$section] ?? ''), ['', 'unavailable'], true);
+
+        if (! $readable('sshd') || ! $readable('accounts') || ! $readable('passwords')) {
+            return ['can_succeed' => null, 'accounts_open_to_guessing' => [], 'why' => 'The SSH settings, accounts or passwords could not be read.'];
+        }
+
+        $settings = collect(explode("\n", $snapshot['sshd']))
+            ->map(fn (string $line): array => preg_split('/\s+/', strtolower(trim($line)), 2) + [1 => ''])
+            ->mapWithKeys(fn (array $setting): array => [$setting[0] => trim($setting[1])]);
+
+        $methods = $settings->get('authenticationmethods', 'any');
+
+        // A guess alone only gets in when one of the allowed ways of logging in needs nothing but a password.
+        $passwordsAccepted = ($settings->get('passwordauthentication') === 'yes' || $settings->get('kbdinteractiveauthentication') === 'yes')
+            && ($methods === 'any' || collect(preg_split('/\s+/', $methods))->contains(
+                fn (string $list): bool => collect(explode(',', $list))->every(fn (string $method): bool => in_array(strtok($method, ':'), ['password', 'keyboard-interactive'], true)),
+            ));
+
+        if (! $passwordsAccepted) {
+            return ['can_succeed' => false, 'accounts_open_to_guessing' => [], 'why' => 'SSH does not accept password logins.'];
+        }
+
+        $canLogIn = collect(explode("\n", $snapshot['accounts']))->map(fn (string $line): string => strtok(trim($line), ' ') ?: '')->filter()->all();
+
+        $open = collect(explode("\n", $snapshot['passwords']))
+            ->map(fn (string $line): array => explode(' ', trim($line), 2) + [1 => ''])
+            ->filter(fn (array $account): bool => in_array($account[0], $canLogIn, true)
+                && ($account[1] === 'password set' || ($account[1] === 'empty password' && $settings->get('permitemptypasswords') === 'yes'))
+                && ($account[0] !== 'root' || $settings->get('permitrootlogin') === 'yes'))
+            ->map(fn (array $account): string => $account[0])
+            ->values()
+            ->all();
+
+        return $open === []
+            ? ['can_succeed' => false, 'accounts_open_to_guessing' => [], 'why' => 'SSH accepts passwords, but no account that may log in with one has a usable password.']
+            : ['can_succeed' => true, 'accounts_open_to_guessing' => $open, 'why' => 'SSH accepts passwords, and these accounts can log in with one.'];
     }
 
     /**

@@ -154,11 +154,30 @@ test('the snapshot lists which accounts have a password, never the password hash
 
 test('the reviewer is told password guesses that can\'t succeed are noise', function () {
     expect((new SecurityReviewer)->instructions())
-        ->toContain('Failed SSH password guesses can only succeed when the SSH settings allow passwords')
-        ->toContain('root only when permitrootlogin is yes')
+        ->toContain('ssh_password_guesses says whether a failed SSH password guess could ever succeed')
         ->toContain('guessing is noise however much of it there is')
-        ->toContain('report it above low');
+        ->toContain('above low')
+        ->toContain('Don\'t suggest lowering fail2ban\'s limits');
 });
+
+test('the review is told whether ssh password guesses could ever succeed', function (array $snapshot, ?bool $canSucceed, array $open) {
+    $server = Server::factory()->create();
+
+    $guesses = app(ReviewContext::class)->build(ScannerState::for($server), $snapshot)['ssh_password_guesses'];
+
+    expect($guesses['can_succeed'])->toBe($canSucceed)
+        ->and($guesses['accounts_open_to_guessing'])->toBe($open);
+})->with([
+    'passwords off' => [['sshd' => "passwordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin yes", 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'root password set'], false, []],
+    'root key only' => [['sshd' => "passwordauthentication yes\npermitrootlogin prohibit-password", 'accounts' => "root uid=0 /bin/bash\nswage uid=1000 /bin/bash", 'passwords' => 'root password set'], false, []],
+    'root open' => [['sshd' => "passwordauthentication yes\npermitrootlogin yes", 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'root password set'], true, ['root']],
+    'an account with a password' => [['sshd' => "passwordauthentication yes\npermitrootlogin no", 'accounts' => "root uid=0 /bin/bash\ndeploy uid=1001 /bin/bash", 'passwords' => "root password set\ndeploy password set"], true, ['deploy']],
+    'a password on an account that cannot log in' => [['sshd' => 'passwordauthentication yes', 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'backup password set'], false, []],
+    'empty passwords refused' => [['sshd' => "passwordauthentication yes\npermitemptypasswords no", 'accounts' => 'deploy uid=1001 /bin/bash', 'passwords' => 'deploy empty password'], false, []],
+    'a key needed as well' => [['sshd' => "passwordauthentication yes\nauthenticationmethods publickey,password", 'accounts' => 'deploy uid=1001 /bin/bash', 'passwords' => 'deploy password set'], false, []],
+    'no passwords' => [['sshd' => 'passwordauthentication yes', 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'none'], false, []],
+    'unreadable' => [['sshd' => 'passwordauthentication yes', 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'unavailable'], null, []],
+]);
 
 test('the snapshot is read by its marker, keeping only known sections, each cut to size', function () {
     $script = new PostureScript('@@SWAGE_POSTURE_TEST');

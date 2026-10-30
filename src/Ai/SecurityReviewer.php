@@ -65,10 +65,12 @@ class SecurityReviewer implements Agent, HasStructuredOutput
         Only report hostile addresses when fail2ban is missing or not keeping up, as its misses_ fields say, when one
         address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in.
 
-        Failed SSH password guesses can only succeed when the SSH settings allow passwords (passwordauthentication or
-        kbdinteractiveauthentication yes) and an account that can log in has a usable password under passwords, and for
-        root only when permitrootlogin is yes. When none can succeed, guessing is noise however much of it there is: don't
-        report it above low, and only suggest turning off password logins as hardening.
+        ssh_password_guesses says whether a failed SSH password guess could ever succeed, worked out by Swage from the SSH
+        settings and accounts. Trust it. When can_succeed is false, SSH guessing is noise however much of it there is and
+        whether or not fail2ban bans it: don't report the guessing, or fail2ban not banning it, above low, and only
+        suggest turning off password logins as hardening. When it is true, name the accounts_open_to_guessing.
+        Many addresses each making a few guesses is a spread-out attack that fail2ban's per-address limits are not meant
+        to catch. Don't suggest lowering fail2ban's limits for it, which would ban real people who mistype.
         A snapshot section of "none" means its command ran and found nothing. "unavailable", or a missing section, means
         it could not be read: say so in what you checked, and don't guess what it would have shown.
 
