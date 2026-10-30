@@ -58,6 +58,10 @@ class SecurityReviewer implements Agent, HasStructuredOutput
         Don't report something as a problem when the data shows it is handled, such as addresses fail2ban has banned or
         that are blocked. Swage's own SSH logins are not counted, and Cloudflare's addresses are never counted or blocked.
 
+        Only events counted as "SSH logins" are logins that succeeded. Every other SSH count is a failed attempt, and the
+        usernames under an address's targets are the names it tried, which need not exist: they don't show accounts on
+        the server. The snapshot's accounts sections are what exists.
+
         Hostile addresses that are neither banned nor blocked are normal. Most are scanners that come and go, fail2ban
         only bans an address once it passes its jail's limit and lifts the ban after a while, and banned_by_fail2ban
         only says whether it was banned at the last scan. People are not expected to block addresses by hand to keep up,

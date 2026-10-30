@@ -21,7 +21,7 @@ enum EventKind: string
     {
         return match ($this) {
             self::SshFailedLogin => __('Failed SSH logins'),
-            self::SshInvalidUser => __('SSH logins as unknown users'),
+            self::SshInvalidUser => __('Failed SSH logins as accounts that don\'t exist'),
             self::SshLogin => __('SSH logins'),
             self::SudoCommand => __('sudo commands'),
             self::SudoFailed => __('Failed sudo attempts'),

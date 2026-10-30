@@ -179,6 +179,14 @@ test('the review is told whether ssh password guesses could ever succeed', funct
     'unreadable' => [['sshd' => 'passwordauthentication yes', 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'unavailable'], null, []],
 ]);
 
+test('the reviewer is told failed attempts as accounts that don\'t exist are not logins', function () {
+    expect(EventKind::SshInvalidUser->label())->toStartWith('Failed SSH logins')
+        ->and((new SecurityReviewer)->instructions())
+        ->toContain('Only events counted as "SSH logins" are logins that succeeded.')
+        ->toContain('they don\'t show accounts on')
+        ->toContain('The snapshot\'s accounts sections are what exists.');
+});
+
 test('the snapshot is read by its marker, keeping only known sections, each cut to size', function () {
     $script = new PostureScript('@@SWAGE_POSTURE_TEST');
 
