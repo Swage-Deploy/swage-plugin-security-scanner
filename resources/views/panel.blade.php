@@ -246,7 +246,7 @@
 
             @if ($this->ai->isConfigured() || $aiEnabled)
                 <flux:switch wire:model.live="aiEnabled" :label="__('Review this server with AI')" align="left" :disabled="! $canManage || ! $this->ai->isConfigured()"
-                    :description="__('Every :hours hours. The scanner\'s counts, alerts and blocks, with the addresses and usernames in them, and the snapshot of the server\'s SSH settings, open ports, firewall, updates and accounts are sent to :host.', ['hours' => config('security-scanner.ai.interval_hours'), 'host' => $this->ai->host() ?? __('the configured API')])" />
+                    :description="__('Every :hours hours. The scanner\'s counts alerts and blocks with the addresses and usernames in them, and the snapshot of the server\'s SSH settings, open ports, firewall, updates and accounts are sent to :host.', ['hours' => config('security-scanner.ai.interval_hours'), 'host' => $this->ai->host() ?? __('the configured API')])" />
                 <flux:error name="aiEnabled" />
             @endif
 
@@ -300,10 +300,15 @@
                                 </div>
                                 <flux:text class="whitespace-pre-line">{{ $finding['detail'] }}</flux:text>
                                 @if (filled($finding['suggestion']))
-                                    <div class="rounded-md bg-zinc-50 p-3 dark:bg-white/5">
-                                        <flux:text class="text-xs font-medium uppercase tracking-wide">{{ __('Suggestion') }}</flux:text>
-                                        <flux:text class="mt-1 whitespace-pre-line break-words">{{ $finding['suggestion'] }}</flux:text>
-                                    </div>
+                                    <details class="group" wire:key="suggestion-{{ $review->id }}-{{ $finding['key'] }}" wire:ignore.self>
+                                        <summary class="flex w-fit cursor-pointer list-none items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 [&::-webkit-details-marker]:hidden">
+                                            <flux:icon.chevron-right variant="micro" class="transition-transform group-open:rotate-90" />
+                                            {{ __('Suggestion') }}
+                                        </summary>
+                                        <div class="mt-2 rounded-md bg-zinc-50 p-3 dark:bg-white/5">
+                                            <flux:text class="whitespace-pre-line break-words">{{ $finding['suggestion'] }}</flux:text>
+                                        </div>
+                                    </details>
                                 @endif
                             </div>
                         @endforeach
@@ -333,8 +338,11 @@
                                         {{ $ignored->ignoredBy ? __('Ignored by :name :time.', ['name' => $ignored->ignoredBy->name, 'time' => $ignored->created_at->diffForHumans()]) : __('Ignored :time.', ['time' => $ignored->created_at->diffForHumans()]) }}
                                     </flux:text>
                                     @if ($current)
-                                        <details class="text-sm">
-                                            <summary class="cursor-pointer text-xs text-zinc-500 dark:text-zinc-400">{{ __('What the review said') }}</summary>
+                                        <details class="group text-sm" wire:key="ignored-said-{{ $ignored->id }}" wire:ignore.self>
+                                            <summary class="flex w-fit cursor-pointer list-none items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 [&::-webkit-details-marker]:hidden">
+                                                <flux:icon.chevron-right variant="micro" class="transition-transform group-open:rotate-90" />
+                                                {{ __('What the review said') }}
+                                            </summary>
                                             <flux:text class="mt-2 whitespace-pre-line">{{ $current['detail'] }}</flux:text>
                                             @if (filled($current['suggestion']))
                                                 <flux:text class="mt-2 whitespace-pre-line break-words">{{ $current['suggestion'] }}</flux:text>
