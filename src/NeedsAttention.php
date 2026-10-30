@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Swage\SecurityScanner\Enums\AlertSeverity;
 use Swage\SecurityScanner\Models\AiReview;
 use Swage\SecurityScanner\Models\BlockedAddress;
+use Swage\SecurityScanner\Models\Fail2banBan;
 use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
@@ -30,15 +31,18 @@ class NeedsAttention
             return [];
         }
 
-        $states = ScannerState::query()->whereIn('server_id', $ids)->get(['server_id', 'fail2ban_banned', 'ai_enabled'])->keyBy('server_id');
+        $states = ScannerState::query()->whereIn('server_id', $ids)->get(['server_id', 'ai_enabled'])->keyBy('server_id');
         $blocked = BlockedAddress::query()->whereIn('server_id', $ids)->where('status', ResourceStatus::Installed)->get(['server_id', 'ip'])->groupBy('server_id');
         $items = [];
 
         // The alerts the panel lists: open ones, leaving out addresses fail2ban has banned or that are blocked.
-        SecurityAlert::query()->whereIn('server_id', $ids)->open()->get(['server_id', 'subject', 'severity'])
-            ->groupBy('server_id')
-            ->each(function (Collection $alerts, int $serverId) use ($states, $blocked, &$items): void {
-                $banned = [...$states->get($serverId)?->fail2ban_banned ?? [], ...$blocked->get($serverId)?->pluck('ip') ?? []];
+        $alerts = SecurityAlert::query()->whereIn('server_id', $ids)->open()->get(['server_id', 'subject', 'severity']);
+        $bans = Fail2banBan::query()->whereIn('server_id', $alerts->pluck('server_id')->unique())->whereIn('ip', $alerts->pluck('subject')->unique())
+            ->get(['server_id', 'ip'])->groupBy('server_id');
+
+        $alerts->groupBy('server_id')
+            ->each(function (Collection $alerts, int $serverId) use ($bans, $blocked, &$items): void {
+                $banned = [...$bans->get($serverId)?->pluck('ip') ?? [], ...$blocked->get($serverId)?->pluck('ip') ?? []];
 
                 foreach ($alerts->reject(fn (SecurityAlert $alert): bool => in_array($alert->subject, $banned, true)) as $alert) {
                     $this->add($items, $serverId, 'alerts', $alert->severity);

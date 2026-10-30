@@ -10,7 +10,6 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
@@ -25,10 +24,12 @@ use Swage\SecurityScanner\Jobs\BlockAddress;
 use Swage\SecurityScanner\Jobs\InstallFail2ban;
 use Swage\SecurityScanner\Jobs\ReviewServerSecurity;
 use Swage\SecurityScanner\Jobs\ScanServerLogs;
+use Swage\SecurityScanner\Jobs\UnbanAllFail2ban;
 use Swage\SecurityScanner\Jobs\UnblockAddress;
 use Swage\SecurityScanner\Jobs\UpdateFail2banTrustedAddresses;
 use Swage\SecurityScanner\Models\AiReview;
 use Swage\SecurityScanner\Models\BlockedAddress;
+use Swage\SecurityScanner\Models\Fail2banBan;
 use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
@@ -424,6 +425,15 @@ class SecurityPanel extends Component
             : __('Installing fail2ban. It shows as installed after the next scan.'));
     }
 
+    public function unbanAll(): void
+    {
+        $this->authorize('update', $this->server);
+
+        UnbanAllFail2ban::dispatch($this->server);
+
+        Flux::toast(variant: 'success', text: __('Lifting every fail2ban ban.'));
+    }
+
     /**
      * The open alerts, most severe first, leaving out addresses fail2ban has banned or that are blocked, which can't
      * reach the server.
@@ -433,17 +443,15 @@ class SecurityPanel extends Component
     #[Computed]
     public function alerts(): LengthAwarePaginator
     {
-        $banned = [
-            ...$this->state->fail2ban_banned ?? [],
-            ...$this->blocked->where('status', ResourceStatus::Installed)->pluck('ip'),
-        ];
+        $blocked = $this->blocked->where('status', ResourceStatus::Installed)->pluck('ip')->all();
 
         $severity = collect(AlertSeverity::cases())->map(fn (AlertSeverity $severity): string => "when '{$severity->value}' then {$severity->rank()}")->implode(' ');
 
         return SecurityAlert::query()
             ->where('server_id', $this->server->id)
             ->open()
-            ->whereNotIn('subject', $banned)
+            ->whereNotIn('subject', $this->bans()->select('ip'))
+            ->whereNotIn('subject', $blocked)
             ->orderByRaw("case severity {$severity} else 0 end desc")
             ->latest('last_seen_at')
             ->paginate(self::PER_PAGE, pageName: 'alertsPage');
@@ -477,7 +485,7 @@ class SecurityPanel extends Component
     public function addresses(): LengthAwarePaginator
     {
         $page = $this->hostileEvents()
-            ->whereNotIn('ip', $this->state->fail2ban_banned ?? [])
+            ->whereNotIn('ip', $this->bans()->select('ip'))
             ->selectRaw('ip, sum(count) as total, max(last_seen_at) as last_seen_at')
             ->groupBy('ip')
             ->orderByDesc('total')
@@ -488,36 +496,46 @@ class SecurityPanel extends Component
     }
 
     /**
-     * The addresses fail2ban has banned, with what they did in the last day, busiest first. An address banned for
-     * longer, such as by the week long recidive jail, may have nothing recorded in the last day.
+     * The addresses fail2ban has banned, with what they did in the last day, busiest first. Bans are permanent, so
+     * most banned addresses have nothing recorded in the last day: they follow, newest ban first.
      *
      * @return LengthAwarePaginator<int, array{ip: string, total: int, kinds: array<string, int>, last_seen_at: CarbonInterface|null, blocked: bool}>
      */
     #[Computed]
     public function bannedAddresses(): LengthAwarePaginator
     {
-        $banned = $this->state->fail2ban_banned ?? [];
-        $page = Paginator::resolveCurrentPage('bannedPage');
-
-        $active = $banned === [] ? collect() : $this->hostileEvents()
-            ->whereIn('ip', $banned)
+        $events = $this->hostileEvents()
             ->selectRaw('ip, sum(count) as total, max(last_seen_at) as last_seen_at')
-            ->groupBy('ip')
-            ->orderByDesc('total')
-            ->orderBy('ip')
-            ->get();
+            ->groupBy('ip');
 
-        $all = $active->pluck('ip')->concat(collect($banned)->diff($active->pluck('ip'))->values());
-        $rows = $active->keyBy('ip');
+        $page = $this->bans()
+            ->leftJoinSub($events, 'events', 'events.ip', '=', 'security_scanner_fail2ban_bans.ip')
+            ->select('security_scanner_fail2ban_bans.ip', 'events.total', 'events.last_seen_at')
+            ->orderByRaw('case when events.total is null then 1 else 0 end')
+            ->orderByDesc('events.total')
+            ->latest('security_scanner_fail2ban_bans.id')
+            ->paginate(self::PER_PAGE, pageName: 'bannedPage');
 
-        $described = $this->describe(
-            $all->forPage($page, self::PER_PAGE)->map(fn (string $ip): SecurityEvent => $rows->get($ip) ?? new SecurityEvent(['ip' => $ip]))->values()
-        );
+        return $page->setCollection($this->describe(
+            $page->getCollection()->map(fn (Fail2banBan $ban): SecurityEvent => (new SecurityEvent)->forceFill(['ip' => $ban->ip, 'total' => $ban->total, 'last_seen_at' => $ban->last_seen_at]))
+        ));
+    }
 
-        return new LengthAwarePaginator($described, $all->count(), self::PER_PAGE, $page, [
-            'path' => Paginator::resolveCurrentPath(),
-            'pageName' => 'bannedPage',
-        ]);
+    /**
+     * How many addresses fail2ban has banned on the server.
+     */
+    #[Computed]
+    public function bannedCount(): int
+    {
+        return $this->bans()->count();
+    }
+
+    /**
+     * @return Builder<Fail2banBan>
+     */
+    protected function bans(): Builder
+    {
+        return Fail2banBan::query()->where('security_scanner_fail2ban_bans.server_id', $this->server->id);
     }
 
     /**

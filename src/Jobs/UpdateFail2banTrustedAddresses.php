@@ -6,6 +6,7 @@ use App\Actions\Servers\RunServerTask;
 use App\Models\Server;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Swage\SecurityScanner\Models\Fail2banBan;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\TrustedAddress;
 
@@ -41,7 +42,7 @@ class UpdateFail2banTrustedAddresses implements ShouldQueue
         $panelAddress = InstallFail2ban::PANEL_ADDRESS;
         $jail = InstallFail2ban::PROBES_JAIL;
         $unban = implode(' ', array_map('escapeshellarg', array_values(array_filter(
-            $state->fail2ban_banned ?? [],
+            Fail2banBan::query()->where('server_id', $this->server->id)->pluck('ip')->all(),
             fn (string $ip): bool => TrustedAddress::covers($ranges, $ip),
         ))));
 

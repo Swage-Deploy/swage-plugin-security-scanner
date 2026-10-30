@@ -5,6 +5,7 @@ namespace Swage\SecurityScanner\Ai;
 use Illuminate\Support\Collection;
 use Swage\SecurityScanner\Enums\EventKind;
 use Swage\SecurityScanner\Models\BlockedAddress;
+use Swage\SecurityScanner\Models\Fail2banBan;
 use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
@@ -95,7 +96,7 @@ class ReviewContext
             'fail2ban' => [
                 'installed' => $state->fail2ban_installed,
                 'jails' => $state->fail2ban_jails,
-                'banned_addresses' => $state->fail2ban_banned ?? [],
+                'banned_count' => Fail2banBan::query()->where('server_id', $serverId)->count(),
                 'could_ban_swage' => $state->fail2banCanBanPanel(),
                 'misses_repeat_offenders' => $state->fail2banMissesRepeatOffenders(),
                 'misses_paced_ssh_guessing' => $state->fail2banMissesPacedSsh(),
@@ -211,7 +212,7 @@ class ReviewContext
             ->get();
 
         $rows = $hostile()->whereIn('ip', $top->pluck('ip'))->get(['ip', 'kind', 'count', 'targets'])->groupBy('ip');
-        $banned = $state->fail2ban_banned ?? [];
+        $banned = Fail2banBan::query()->where('server_id', $state->server_id)->whereIn('ip', $top->pluck('ip'))->pluck('ip')->all();
         $blocked = BlockedAddress::query()->where('server_id', $state->server_id)->pluck('ip')->all();
 
         return $top->map(fn (SecurityEvent $address): array => [

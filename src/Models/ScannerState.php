@@ -15,7 +15,7 @@ use Swage\SecurityScanner\Jobs\InstallFail2ban;
  * @property array{journal?: string|null, files?: array<string, array{inode: int, offset: int}>}|null $cursors
  */
 #[Table('security_scanner_states')]
-#[Fillable(['server_id', 'enabled', 'cursors', 'panel_address', 'fail2ban_installed', 'fail2ban_jails', 'fail2ban_ignores_panel', 'fail2ban_recidive_reads_log', 'fail2ban_sshd_counts_hour', 'fail2ban_bans_permanently', 'fail2ban_banned', 'last_scanned_at', 'last_error', 'ai_enabled', 'ai_reviewed_at', 'ai_error'])]
+#[Fillable(['server_id', 'enabled', 'cursors', 'panel_address', 'fail2ban_installed', 'fail2ban_jails', 'fail2ban_ignores_panel', 'fail2ban_recidive_reads_log', 'fail2ban_sshd_counts_hour', 'fail2ban_bans_permanently', 'last_scanned_at', 'last_error', 'ai_enabled', 'ai_reviewed_at', 'ai_error'])]
 class ScannerState extends Model
 {
     /**
@@ -44,7 +44,6 @@ class ScannerState extends Model
             'fail2ban_recidive_reads_log' => 'boolean',
             'fail2ban_sshd_counts_hour' => 'boolean',
             'fail2ban_bans_permanently' => 'boolean',
-            'fail2ban_banned' => 'array',
             'last_scanned_at' => 'datetime',
             'ai_enabled' => 'boolean',
             'ai_reviewed_at' => 'datetime',

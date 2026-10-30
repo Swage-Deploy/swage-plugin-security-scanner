@@ -9,6 +9,7 @@ use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Jobs\BlockAddress;
 use Swage\SecurityScanner\Jobs\UpdateFail2banTrustedAddresses;
 use Swage\SecurityScanner\Models\BlockedAddress;
+use Swage\SecurityScanner\Models\Fail2banBan;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\TrustedAddress;
 
@@ -62,12 +63,13 @@ class LogScanner
         $this->recorder->record($state->server, $events);
         $this->detector->detect($state, $events);
 
+        Fail2banBan::sync($state->server_id, $output->fail2banBanned);
+
         $state->update([
             'cursors' => $this->cursors($state, $output),
             'panel_address' => $panelAddress,
             'fail2ban_installed' => $output->fail2banInstalled,
             'fail2ban_jails' => $output->fail2banJails,
-            'fail2ban_banned' => $output->fail2banBanned,
             'fail2ban_ignores_panel' => $output->fail2banIgnoresPanel,
             'fail2ban_recidive_reads_log' => $output->fail2banRecidiveReadsLog,
             'fail2ban_sshd_counts_hour' => $output->fail2banSshdCountsHour,

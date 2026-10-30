@@ -75,8 +75,9 @@ class SecurityReviewer implements Agent, HasStructuredOutput
 
         Hostile addresses that are neither banned nor blocked are normal. Most are scanners that come and go, fail2ban
         only bans an address once it passes its jail's limit in a day, and then bans it for good unless
-        misses_permanent_bans is true, and banned_by_fail2ban only says whether it was banned at the last scan. People are not expected to block addresses by hand to keep up,
-        so don't report that the blocked list is short, and don't suggest blocking addresses fail2ban can deal with.
+        misses_permanent_bans is true, and banned_by_fail2ban only says whether it was banned at the last scan. People
+        are not expected to block addresses by hand to keep up, so don't report that the blocked list is short, and
+        don't suggest blocking addresses fail2ban can deal with.
         Only report hostile addresses when fail2ban is missing or not keeping up, as its misses_ fields say, when one
         address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in.
 

@@ -23,6 +23,7 @@ use Swage\SecurityScanner\Jobs\UnblockAddress;
 use Swage\SecurityScanner\Jobs\UpdateFail2banTrustedAddresses;
 use Swage\SecurityScanner\Livewire\SecurityPanel;
 use Swage\SecurityScanner\Models\BlockedAddress;
+use Swage\SecurityScanner\Models\Fail2banBan;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
@@ -107,6 +108,14 @@ function sshLine(string $message, string $time = '2026-10-23T11:58:00+00:00'): s
 function accessLine(string $ip, string $request, int $status = 404, string $time = '23/Oct/2026:11:58:00 +0000'): string
 {
     return "{$ip} - - [{$time}] \"{$request}\" {$status} 162 \"-\" \"Mozilla/5.0\"";
+}
+
+/**
+ * @return list<string>
+ */
+function bannedIps(Server $server): array
+{
+    return Fail2banBan::query()->where('server_id', $server->id)->orderBy('id')->pluck('ip')->all();
 }
 
 function scan(Server $server): ScannerState
@@ -287,10 +296,11 @@ test('a scan counts events per address and hour, raises no alert for brute force
 
     expect(SecurityAlert::count())->toBe(0);
 
+    expect(bannedIps($server))->toBe(['203.0.113.9']);
+
     expect($state)
         ->panel_address->toBe('198.51.100.1')
         ->fail2ban_installed->toBeTrue()
-        ->fail2ban_banned->toBe(['203.0.113.9'])
         ->last_error->toBeNull()
         ->cursors->toBe([
             'journal' => 's=abc;i=10',
@@ -332,9 +342,10 @@ test('fail2ban\'s jails and the addresses they banned are read from the scan', f
     scannedServer(banned: "jails sshd, recidive\n203.0.113.9\n203.0.113.10 203.0.113.9");
     $state = scan($server);
 
+    expect(bannedIps($server))->toBe(['203.0.113.9', '203.0.113.10']);
+
     expect($state)
-        ->fail2ban_jails->toBe(['sshd', 'recidive'])
-        ->fail2ban_banned->toBe(['203.0.113.9', '203.0.113.10']);
+        ->fail2ban_jails->toBe(['sshd', 'recidive']);
 });
 
 test('servers whose fail2ban has no probes jail are offered an update once they have sites\' logs', function (?array $jails, array $files, bool $needsUpdate) {
@@ -358,9 +369,10 @@ test('servers whose fail2ban could ban swage\'s own address are offered an updat
     scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel no\n203.0.113.9");
     $state = scan($server);
 
+    expect(bannedIps($server))->toBe(['203.0.113.9']);
+
     expect($state)
         ->fail2ban_ignores_panel->toBeFalse()
-        ->fail2ban_banned->toBe(['203.0.113.9'])
         ->and($state->needsFail2banUpdate())->toBeTrue();
 
     Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
@@ -380,9 +392,10 @@ test('servers whose recidive jail can\'t see fail2ban\'s bans are offered an upd
     scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel yes\nrecidive-reads-log no\n203.0.113.9");
     $state = scan($server);
 
+    expect(bannedIps($server))->toBe(['203.0.113.9']);
+
     expect($state)
         ->fail2ban_recidive_reads_log->toBeFalse()
-        ->fail2ban_banned->toBe(['203.0.113.9'])
         ->and($state->needsFail2banUpdate())->toBeTrue();
 
     Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
@@ -402,9 +415,10 @@ test('servers whose sshd jail only counts failed logins over ten minutes are off
     scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel yes\nrecidive-reads-log yes\nsshd-counts-hour no\n203.0.113.9");
     $state = scan($server);
 
+    expect(bannedIps($server))->toBe(['203.0.113.9']);
+
     expect($state)
         ->fail2ban_sshd_counts_hour->toBeFalse()
-        ->fail2ban_banned->toBe(['203.0.113.9'])
         ->and($state->needsFail2banUpdate())->toBeTrue();
 
     Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
@@ -424,9 +438,10 @@ test('servers whose fail2ban bans only last a while are offered an update', func
     scannedServer(banned: "jails sshd, recidive, swage-probes\nignores-panel yes\nrecidive-reads-log yes\nsshd-counts-hour yes\nbans-permanently no\n203.0.113.9");
     $state = scan($server);
 
+    expect(bannedIps($server))->toBe(['203.0.113.9']);
+
     expect($state)
         ->fail2ban_bans_permanently->toBeFalse()
-        ->fail2ban_banned->toBe(['203.0.113.9'])
         ->and($state->needsFail2banUpdate())->toBeTrue();
 
     Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
@@ -458,7 +473,8 @@ test('the scan script asks whether fail2ban leaves swage\'s address alone', func
 
 test('alerts about addresses fail2ban has banned or that are blocked are left out of the open alerts', function () {
     $server = Server::factory()->create();
-    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true, 'fail2ban_banned' => ['203.0.113.9']]);
+    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true]);
+    Fail2banBan::sync($server->id, ['203.0.113.9']);
     BlockedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.10', 'status' => ResourceStatus::Installed]);
     BlockedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.11', 'status' => ResourceStatus::Failed]);
 
@@ -730,7 +746,8 @@ test('the busiest hostile addresses show when each was last seen, and blocked on
 test('each of the panel\'s tables shows ten rows a page', function () {
     $server = Server::factory()->create();
     $ips = collect(range(1, 12))->map(fn (int $i): string => "203.0.113.{$i}");
-    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true, 'fail2ban_banned' => collect(range(1, 12))->map(fn (int $i): string => "198.51.100.{$i}")->all()]);
+    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true]);
+    Fail2banBan::sync($server->id, collect(range(1, 12))->map(fn (int $i): string => "198.51.100.{$i}")->all());
 
     foreach ($ips as $i => $ip) {
         BlockedAddress::create(['server_id' => $server->id, 'ip' => "192.0.2.{$i}", 'status' => ResourceStatus::Installed]);
@@ -753,7 +770,8 @@ test('each of the panel\'s tables shows ten rows a page', function () {
 
 test('the fail2ban panel says how many addresses are banned', function (array $banned, string $text) {
     $server = Server::factory()->create();
-    ScannerState::for($server)->update(['fail2ban_installed' => true, 'fail2ban_banned' => $banned]);
+    ScannerState::for($server)->update(['fail2ban_installed' => true]);
+    Fail2banBan::sync($server->id, $banned);
 
     Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])->assertSee($text);
 })->with([
@@ -764,7 +782,8 @@ test('the fail2ban panel says how many addresses are banned', function (array $b
 
 test('addresses fail2ban has banned are listed under fail2ban instead of among the busiest', function () {
     $server = Server::factory()->create();
-    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true, 'fail2ban_banned' => ['203.0.113.9', '203.0.113.50']]);
+    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true]);
+    Fail2banBan::sync($server->id, ['203.0.113.9', '203.0.113.50']);
     $event = fn (string $ip, int $count) => SecurityEvent::create(['server_id' => $server->id, 'kind' => EventKind::SshFailedLogin, 'ip' => $ip, 'source' => 'ssh', 'bucket' => now()->startOfHour(), 'count' => $count, 'first_seen_at' => now()->subMinutes(10), 'last_seen_at' => now()->subMinutes(10)]);
     $event('203.0.113.9', 40);
     $event('203.0.113.10', 6);
@@ -949,7 +968,8 @@ test('fail2ban never bans trusted addresses', function () {
 test('changing trusted addresses rewrites fail2ban\'s ignore lists, reloads it and lifts bans on them', function () {
     $shell = fakeShell();
     $server = Server::factory()->create();
-    ScannerState::for($server)->update(['fail2ban_installed' => true, 'panel_address' => '198.51.100.7', 'fail2ban_banned' => ['203.0.113.9', '192.0.2.4']]);
+    ScannerState::for($server)->update(['fail2ban_installed' => true, 'panel_address' => '198.51.100.7']);
+    Fail2banBan::sync($server->id, ['203.0.113.9', '192.0.2.4']);
     TrustedAddress::create(['server_id' => $server->id, 'ip' => '203.0.113.0/24']);
 
     app()->call([new UpdateFail2banTrustedAddresses($server), 'handle']);
@@ -1005,6 +1025,47 @@ test('the address swage connects from is trusted as the swage host, follows swag
         ['ip' => '2001:db8::1', 'note' => null, 'swage_host' => true],
     ]);
     Queue::assertPushed(UpdateFail2banTrustedAddresses::class, 3);
+});
+
+test('the panel copes with tens of thousands of bans, and scans keep them in step with fail2ban', function () {
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['last_scanned_at' => now(), 'fail2ban_installed' => true]);
+    $banned = collect(range(0, 39_999))->map(fn (int $i): string => '10.'.intdiv($i, 256).'.'.($i % 256).'.1')->all();
+    Fail2banBan::sync($server->id, $banned);
+    SecurityEvent::create(['server_id' => $server->id, 'kind' => EventKind::HttpProbe, 'ip' => '10.0.5.1', 'source' => 'nginx', 'bucket' => now()->startOfHour(), 'count' => 7, 'first_seen_at' => now(), 'last_seen_at' => now()]);
+    SecurityEvent::create(['server_id' => $server->id, 'kind' => EventKind::HttpProbe, 'ip' => '203.0.113.9', 'source' => 'nginx', 'bucket' => now()->startOfHour(), 'count' => 3, 'first_seen_at' => now(), 'last_seen_at' => now()]);
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('40,000 addresses are banned right now.')
+        ->assertSeeInOrder(['10.0.5.1', '10.156.63.1'])
+        ->assertSee('203.0.113.9');
+
+    Fail2banBan::sync($server->id, ['10.0.5.1', '192.0.2.4']);
+
+    expect(bannedIps($server))->toBe(['10.0.5.1', '192.0.2.4']);
+});
+
+test('every fail2ban ban can be lifted at once', function () {
+    $shell = fakeShell();
+    $server = Server::factory()->create();
+    ScannerState::for($server)->update(['fail2ban_installed' => true]);
+    Fail2banBan::sync($server->id, ['203.0.113.9', '192.0.2.4']);
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])
+        ->assertSee('Unban all')
+        ->call('unbanAll');
+
+    expect($shell->lastScript())
+        ->toContain('systemctl stop fail2ban')
+        ->toContain("python3 - /var/lib/fail2ban/fail2ban.sqlite3 <<'PY'")
+        ->toContain("for table in ('bans', 'bips'):")
+        ->toContain(': > "$file"')
+        ->toContain("trap 'systemctl start fail2ban' EXIT")
+        ->and(strpos($shell->lastScript(), 'systemctl stop fail2ban'))->toBeLessThan(strpos($shell->lastScript(), 'python3'))
+        ->and(bannedIps($server))->toBe([])
+        ->and($server->tasks()->first()->name)->toBe('Lifting every fail2ban ban');
+
+    Livewire::actingAs($server->user)->test(SecurityPanel::class, ['server' => $server])->assertDontSee('Unban all');
 });
 
 test('servers without fail2ban are left alone when trusted addresses change', function () {

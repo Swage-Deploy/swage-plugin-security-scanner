@@ -10,6 +10,7 @@ use Swage\SecurityScanner\Enums\AlertRule;
 use Swage\SecurityScanner\Enums\AlertSeverity;
 use Swage\SecurityScanner\Models\AiReview;
 use Swage\SecurityScanner\Models\BlockedAddress;
+use Swage\SecurityScanner\Models\Fail2banBan;
 use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
@@ -52,7 +53,8 @@ test('the scanner says which servers have open alerts or findings to look at', f
 
     $quiet = Server::factory()->create();
     $server = Server::factory()->create();
-    ScannerState::for($server)->update(['ai_enabled' => true, 'fail2ban_banned' => ['203.0.113.5']]);
+    ScannerState::for($server)->update(['ai_enabled' => true]);
+    Fail2banBan::sync($server->id, ['203.0.113.5']);
 
     attentionAlert($server, '198.51.100.1');
     attentionAlert($server, '198.51.100.2', attributes: ['resolved_at' => now()]);

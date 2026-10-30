@@ -216,7 +216,12 @@
                     @endif
                 </flux:callout>
             @endif
-            <flux:text>{{ trans_choice('{0} Installed. No addresses are banned right now.|{1} Installed. :count address is banned right now.|[2,*] Installed. :count addresses are banned right now.', count($this->state->fail2ban_banned ?? []), ['count' => count($this->state->fail2ban_banned ?? [])]) }}</flux:text>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <flux:text>{{ trans_choice('{0} Installed. No addresses are banned right now.|{1} Installed. :count address is banned right now.|[2,*] Installed. :count addresses are banned right now.', $this->bannedCount, ['count' => number_format($this->bannedCount)]) }}</flux:text>
+                @if ($canManage && $this->bannedCount > 0)
+                    <flux:button size="sm" variant="ghost" icon="trash" wire:click="unbanAll" wire:confirm="{{ __('Lift every fail2ban ban on this server? Banned addresses can reach SSH and the sites again until they fail enough to be banned again. Addresses blocked from this panel stay blocked.') }}">{{ __('Unban all') }}</flux:button>
+                @endif
+            </div>
             @if ($this->bannedAddresses->total() > 0)
                 <div class="mt-4">
                     @include('security-scanner::address-table', ['addresses' => $this->bannedAddresses, 'empty' => '', 'paginationClass' => ''])
