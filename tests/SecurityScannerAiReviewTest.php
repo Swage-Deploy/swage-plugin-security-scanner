@@ -158,9 +158,17 @@ test('the reviewer is told password guesses that can\'t succeed are noise', func
         ->toContain('ssh_password_guesses says whether a failed SSH password guess could ever succeed')
         ->toContain('guessing is noise however much of it there is')
         ->toContain('don\'t report the guessing, its volume')
-        ->toContain('a large volume of failed SSH attempts is not a finding on its own')
+        ->toContain('a large volume of failed SSH attempts, or of probes for vulnerable files')
+        ->toContain('is not a finding on its own while fail2ban is')
         ->not->toContain('above low')
         ->toContain('Don\'t suggest lowering fail2ban\'s limits');
+});
+
+test('the reviewer is told sshd -T names prohibit-password without-password, so it doesn\'t report the old name', function () {
+    expect((new SecurityReviewer)->instructions())
+        ->toContain('shows PermitRootLogin prohibit-password as "without-password"')
+        ->toContain('Don\'t report')
+        ->toContain('the name or suggest changing it');
 });
 
 test('the review is told whether ssh password guesses could ever succeed', function (array $snapshot, ?bool $canSucceed, array $open) {
@@ -173,6 +181,7 @@ test('the review is told whether ssh password guesses could ever succeed', funct
 })->with([
     'passwords off' => [['sshd' => "passwordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin yes", 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'root password set'], false, []],
     'root key only' => [['sshd' => "passwordauthentication yes\npermitrootlogin prohibit-password", 'accounts' => "root uid=0 /bin/bash\nswage uid=1000 /bin/bash", 'passwords' => 'root password set'], false, []],
+    'root key only, as sshd -T names it' => [['sshd' => "passwordauthentication yes\npermitrootlogin without-password", 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'root password set'], false, []],
     'root open' => [['sshd' => "passwordauthentication yes\npermitrootlogin yes", 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'root password set'], true, ['root']],
     'an account with a password' => [['sshd' => "passwordauthentication yes\npermitrootlogin no", 'accounts' => "root uid=0 /bin/bash\ndeploy uid=1001 /bin/bash", 'passwords' => "root password set\ndeploy password set"], true, ['deploy']],
     'a password on an account that cannot log in' => [['sshd' => 'passwordauthentication yes', 'accounts' => 'root uid=0 /bin/bash', 'passwords' => 'backup password set'], false, []],
