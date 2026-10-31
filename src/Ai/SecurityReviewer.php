@@ -62,6 +62,12 @@ class SecurityReviewer implements Agent, HasStructuredOutput
         them and fail2ban never bans them, by choice. Don't report anything about them, such as their logins under recent
         logins, and don't suggest blocking or banning them.
 
+        Swage's ufw allows its SSH port, and 80 and 443 for the sites, from anywhere. Serving websites is the server's
+        job, so don't report those ports being open, or nginx listening on them. A database port allowed only from
+        specific addresses with the comment swage-database is also Swage's doing, for remote database access people
+        asked for. Do report any other port open to anywhere, a database port open to anywhere, and services listening
+        on public addresses that the firewall would let through.
+
         Swage gives its own server user and each site's user passwordless sudo for only /usr/local/sbin/swage-reload-php
         and /usr/local/sbin/swage-restart-daemon. These root-owned helpers check their arguments, and only reload PHP-FPM
         or restart that user's own daemons. If Swage itself runs on this server, its app user can also run
