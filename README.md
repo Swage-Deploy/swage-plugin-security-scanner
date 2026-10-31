@@ -12,13 +12,15 @@
 
 ---
 
-Reads each server's SSH, sudo and nginx access logs every few minutes, counts brute force attempts and probing, raises alerts about SSH logins, and lets you block addresses in the server's firewall. It can also install fail2ban, which bans the addresses behind brute force attempts and probing, and have an AI model review each server's security and suggest what to fix.
+Reads each server's SSH, sudo and nginx access logs every few minutes, counts brute force attempts and probing, raises alerts about SSH logins, and lets you block addresses in the server's firewall. It can also install fail2ban, which bans the addresses behind brute force attempts and probing.
+
+The AI review that earlier versions included is now a plugin of its own, [AI review](https://github.com/Swage-Deploy/swage-plugin-ai-review), which also reviews each server's performance and reliability. When both are installed, its reviews include what the scanner recorded. Updating to this version removes the scanner's old reviews, ignored findings and API settings, so set the AI review plugin up afresh.
 
 The scanner is turned on per server, from the server's **Plugins** tab.
 
 ## Requirements
 
-- Swage `v1.0.1` or later. The [AI review](#ai-review) needs Swage `v1.3.0`, which added plugin settings, and the [badges](#badges-on-servers-that-need-looking-at) need Swage `v1.3.3`.
+- Swage `v1.0.1` or later. The [badges](#badges-on-servers-that-need-looking-at) need Swage `v1.3.3`.
 - Ubuntu servers with `ufw`, which Swage sets up when it provisions them
 
 ## Installation
@@ -109,64 +111,29 @@ A trusted address:
 - **isn't counted or alerted on.** Scans leave out its events, as they do Cloudflare's. Trusting it clears what the scanner already recorded about it, and resolves its open alerts.
 - **can't be blocked.** Trusting a blocked address unblocks it.
 - **is never banned by fail2ban.** It's added to every jail's `ignoreip`. When trusted addresses change, Swage rewrites the `ignoreip` lines in `/etc/fail2ban/jail.d/swage.conf` and `swage-probes.conf`, runs `fail2ban-client reload`, which keeps its bans and the failures it has counted, and lifts any ban on a trusted address. This shows in the server's activity log. Installing or updating fail2ban includes them too.
-- **is left out of the AI review.** The review is sent the trusted addresses and their notes, and told not to report anything about them, such as their logins under recent logins.
+- **is left out of AI reviews.** The [AI review](https://github.com/Swage-Deploy/swage-plugin-ai-review) plugin is sent the trusted addresses and their notes, and told not to report anything about them, such as their logins under recent logins.
 
 The address Swage connects to the server from is always trusted, with the note **Swage Host**, and can't be removed. Each scan checks it, and if Swage starts connecting from a new address, such as after moving Swage to a new host, the new one is trusted in its place. An address you had trusted yourself before Swage used it stays trusted when Swage moves away.
 
 Stopping trusting an address takes it out of fail2ban's `ignoreip` again. What the scanner cleared isn't restored, and it's counted again from the next scan.
 
-## AI review
+## What the AI review is sent
 
-The AI review has an AI model look over each server it's turned on for and suggest what to fix. It works with any OpenAI compatible chat completions API, such as OpenAI, OpenRouter, or a local Ollama or vLLM, through [Laravel AI](https://github.com/laravel/ai).
+When the [AI review](https://github.com/Swage-Deploy/swage-plugin-ai-review) plugin reviews a server this scanner scans, `Swage\SecurityScanner\ReviewRecords` gives it the scanner's records: event totals for the last day and each of the last 7 days, the 25 busiest hostile addresses with a few of the usernames or paths each tried, open alerts, blocked addresses, trusted addresses and fail2ban's state. It also gives the rules for reading them, which the review adds to its instructions. They say that:
 
-**It only reads and suggests.** The model gets no tools and no access to the server. Swage gathers what it reviews and sends it as text, and the only thing the review writes is its findings, to Swage's database. Nothing the model suggests is ever run. A person decides what to do, and the panel's own actions, such as blocking an address or installing fail2ban, still need someone to click them.
+- only events counted as SSH logins succeeded, and the usernames attackers tried don't show which accounts exist,
+- busy hostile addresses that aren't banned or blocked are normal, so the review doesn't ask for addresses to be blocked by hand, and only reports them when fail2ban is missing or not keeping up, when one address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in,
+- a large number of failed SSH attempts or probes isn't a finding on its own while fail2ban is running and keeping up,
+- fail2ban's limits shouldn't be lowered for many addresses each guessing a few times, which would ban people who mistype,
+- trusted addresses are left out.
 
-To set it up:
-
-1. On Swage's **Plugins** page, open the **Server** tab and **Configure Security scanner**. Enter:
-   - **API URL**: the base URL of the API, ending before `/chat/completions`, such as `https://api.openai.com/v1`.
-   - **API key**: sent as a bearer token. It's stored encrypted, and can be left blank for APIs that don't need one.
-   - **Model**: the model to use. It must reply in JSON reliably. The review asks for a JSON schema response and also spells the schema out in its instructions, since some APIs, such as Ollama's, ignore the requested format. A reply that isn't that JSON fails the review rather than showing as clean.
-2. Turn on **Review this server with AI** in each server's Security scanner panel. The first review runs straight away. Then each server is reviewed every 6 hours, or whenever someone clicks **Review now**.
-
-Each review sends the API:
-
-- what the scanner recorded: event totals for the last day and each of the last 7 days, the 25 busiest hostile addresses with a few of the usernames or paths each tried, open alerts, blocked addresses and fail2ban's state,
-- a snapshot of how the server is set up, read by a fixed script that only runs read-only commands: the OS and kernel, whether a reboot is required, packages with pending updates, whether automatic updates are on, the effective `sshd` settings, listening ports, `ufw status`, accounts that can log in, which accounts have a usable password (only their names, never the password hashes), how many authorized SSH keys each has, passwordless sudo rules, failed systemd units and recent logins.
-
-That includes IP addresses and account names, so only use an API you trust with them. The script runs over Swage's existing SSH connection, like a scan does. The model can't change it or add to it. The plugin's tests check that the script only runs commands that read, and never writes a file.
-
-The panel shows the latest review: a short summary, then each finding with its severity, what was seen and a suggestion. Suggestions can include shell commands. They come from a model and can be wrong, so check them before acting. Usernames and paths in the logs can be chosen by attackers, and the model is told to treat everything it's given as data, not instructions.
-
-The model is told that only events counted as SSH logins succeeded, and that the usernames attackers tried don't show which accounts exist, so failed attempts as made-up names like `admin` aren't reported as logins or unknown accounts. Busy hostile addresses that aren't banned or blocked are normal: most are scanners that come and go, and fail2ban bans them once they pass its limits and lifts the bans later. The model is told not to suggest blocking them by hand. It only reports hostile addresses when fail2ban is missing or not keeping up, when one address attacks far harder than the rest without being banned, or when one did more than fail, such as logging in. Swage works out from the snapshot whether an SSH password guess could ever succeed: SSH must accept passwords on their own, and an account that can log in must have a usable password, with root also needing `PermitRootLogin yes`. It sends the answer to the model as `ssh_password_guesses`, with the accounts open to guessing. When no guess can succeed, the model is told to rate the guessing, and fail2ban not banning it, as low at most. It is also told not to suggest lowering fail2ban's limits for many addresses each guessing a few times, which would ban people who mistype. Swage's own passwordless sudo rules, which only let its users reload PHP-FPM, restart their own daemons and, on the server Swage runs on, migrate or reboot it, aren't reported. Any other passwordless sudo rule, or one of Swage's widened with more commands or wildcards, still is.
-
-### Ignoring a finding
-
-People who can manage the server can click **Ignore** on a finding they've decided to accept, such as SSH on port 22. It moves to an **Ignored** section below the findings, which says whether the latest review still reports it, and who ignored it. **Stop ignoring** puts it back.
-
-Ignoring a finding doesn't stop reviews checking for it. Each finding has a short key, such as `ssh-password-login`, which the model is asked to keep the same from one review to the next. Reviews are sent the keys and titles of ignored findings, told to check those parts of the server as usual, and to report an ignored issue under its key whenever they see it. Matching relies on the model reusing the key, so a reworded finding with a new key shows with the others again and can be ignored again.
-
-### Checking a review read the server
-
-A review that finds nothing should still show that it looked. Each review shows:
-
-- **What was checked**: collapsed by default, what the model says it looked at, one line per part of the snapshot and of the scanner's records, with what it saw, such as "SSH settings: password logins off, root login key only". The model is told to list these even when nothing needs attention. If a review has none, the panel says there's no sign it read the server.
-- **The model and tokens**: the model you set, the model the API reports it used if that's different, and how many tokens it read and wrote. A review of a busy server that read only a few hundred tokens didn't get much.
-- **Parts that couldn't be read**: each part of the snapshot says when its command failed or isn't installed, as opposed to running and finding nothing. If any couldn't be read, the panel lists them, since anything wrong there wasn't checked.
-- **What was sent**: the exact data the model was given, for people who can manage the server. It includes the server's accounts and sudo rules, so viewers don't see it.
-
-To test a model before trusting a clean review, set up something it should flag on a test server, such as a service listening on a public port or `PermitRootLogin yes`, and click **Review now**.
-
-A review that fails shows its error in the panel, and isn't tried again until the next review is due. Reviews are kept for 30 days and aren't recorded in the server's activity log.
+Servers the scanner isn't turned on for send nothing.
 
 ## Badges on servers that need looking at
 
-On Swage `v1.3.3` or later, a server with something in its Security scanner panel to look at gets a badge with the count: on its card on the servers page, on its **Plugins** tab, and on the Security scanner's tab. Hover over it to see what's counted. It counts:
+On Swage `v1.3.3` or later, a server with something in its Security scanner panel to look at gets a badge with the count: on its card on the servers page, on its **Plugins** tab, and on the Security scanner's tab. It counts open SSH login alerts, leaving out addresses fail2ban has banned or that are blocked, as the panel's Open alerts table does.
 
-- open SSH login alerts, leaving out addresses fail2ban has banned or that are blocked, as the panel's Open alerts table does,
-- findings in the latest AI review that nobody has ignored, while the server is still reviewed.
-
-The badge is red when any of them is high severity, amber for medium and grey for low. Resolving the alerts and fixing or ignoring the findings clears it.
+The badge is red when any of them is high severity, amber for medium and grey for low. Resolving the alerts clears it.
 
 ## Configuration
 
@@ -178,13 +145,8 @@ These can be set in Swage's `.env`:
 | `SECURITY_SCANNER_RETENTION_DAYS` | `14` | Days of counted events to keep. |
 | `SECURITY_SCANNER_SSH_FAILURES` | `10` | Failed SSH logins from one address in a day before fail2ban bans it for good. Servers pick up a change when fail2ban is installed or updated. |
 | `SECURITY_SCANNER_HTTP_PROBES` | `5` | Probes from one address in a day before fail2ban bans it from the sites for good. Servers pick up a change when fail2ban is installed or updated. |
-| `SECURITY_SCANNER_AI_INTERVAL_HOURS` | `6` | Hours between AI reviews of each server. |
-| `SECURITY_SCANNER_AI_TIMEOUT` | `120` | Seconds to wait for the API to answer. |
-| `SECURITY_SCANNER_AI_RETENTION_DAYS` | `30` | Days of AI reviews to keep. |
 
-The AI review's API URL, key and model are set on the plugin's **Configure** page instead.
-
-Scans and AI reviews run on Swage's queue, one of each at a time per server, and aren't recorded in the server's activity log.
+Scans run on Swage's queue, one at a time per server, and aren't recorded in the server's activity log.
 
 ## Extending
 
@@ -202,14 +164,14 @@ sudo -u swage php /home/swage/app/current/artisan swage:plugin:update swage/secu
 
 The plugin implements Swage's server integration contract (`App\Servers\ServerIntegration`), version 1, so it runs inside a Swage install rather than on its own.
 
-`tests/SecurityScannerPluginTest.php` and `tests/SecurityScannerAiReviewTest.php` are Pest tests that run inside a Swage checkout: they use Swage's models, factories and test helpers. To run them:
+The `tests/SecurityScanner*Test.php` files are Pest tests that run inside a Swage checkout: they use Swage's models, factories and test helpers. To run them:
 
-1. Add this plugin's `src` directory to the Swage checkout's `autoload-dev` as `Swage\\SecurityScanner\\`, and run `composer require laravel/ai:^1.3`.
+1. Add this plugin's `src` directory to the Swage checkout's `autoload-dev` as `Swage\\SecurityScanner\\`.
 2. Run `composer dump-autoload`.
 3. Copy the tests into Swage's `tests/Feature`.
 4. Run `php artisan test --filter=SecurityScanner`.
 
-The test runs the plugin's migrations itself.
+The tests run the plugin's migrations themselves.
 
 ## License
 

@@ -12,20 +12,6 @@ return [
     'fail2ban_ssh' => (int) env('SECURITY_SCANNER_SSH_FAILURES', 10),
     'fail2ban_probes' => (int) env('SECURITY_SCANNER_HTTP_PROBES', 5),
 
-    // The AI review, which sends what the scanner recorded and a read-only snapshot of each server's setup to the
-    // OpenAI compatible API set on the plugin's config page, and stores the findings it suggests. It never changes a
-    // server: nothing it suggests is run.
-    'ai' => [
-        // How often, in hours, each server it is turned on for is reviewed.
-        'interval_hours' => (int) env('SECURITY_SCANNER_AI_INTERVAL_HOURS', 6),
-
-        // How long, in seconds, to wait for the API to answer.
-        'timeout' => (int) env('SECURITY_SCANNER_AI_TIMEOUT', 120),
-
-        // How many days of reviews are kept.
-        'retention_days' => (int) env('SECURITY_SCANNER_AI_RETENTION_DAYS', 30),
-    ],
-
     // Requests for paths matching these patterns are counted as probing. No visitor asks a Laravel site for dotfiles,
     // dependencies or well known admin tools, so these are scanners.
     'probes' => [

@@ -13,24 +13,19 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
-use Livewire\Attributes\Locked;
 use Livewire\Component;
 use Livewire\WithPagination;
-use Swage\SecurityScanner\Ai\AiSettings;
 use Swage\SecurityScanner\CloudflareAddresses;
 use Swage\SecurityScanner\Enums\AlertSeverity;
 use Swage\SecurityScanner\Enums\EventKind;
 use Swage\SecurityScanner\Jobs\BlockAddress;
 use Swage\SecurityScanner\Jobs\InstallFail2ban;
-use Swage\SecurityScanner\Jobs\ReviewServerSecurity;
 use Swage\SecurityScanner\Jobs\ScanServerLogs;
 use Swage\SecurityScanner\Jobs\UnbanAllFail2ban;
 use Swage\SecurityScanner\Jobs\UnblockAddress;
 use Swage\SecurityScanner\Jobs\UpdateFail2banTrustedAddresses;
-use Swage\SecurityScanner\Models\AiReview;
 use Swage\SecurityScanner\Models\BlockedAddress;
 use Swage\SecurityScanner\Models\Fail2banBan;
-use Swage\SecurityScanner\Models\IgnoredFinding;
 use Swage\SecurityScanner\Models\ScannerState;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
@@ -38,8 +33,7 @@ use Swage\SecurityScanner\Models\TrustedAddress;
 
 /**
  * The security scanner's panel on a server's Plugins tab: whether scanning is on, open SSH login alerts, the busiest
- * hostile addresses of the last day, the addresses blocked in the firewall, trusted addresses, fail2ban, and the AI
- * review.
+ * hostile addresses of the last day, the addresses blocked in the firewall, trusted addresses and fail2ban.
  */
 class SecurityPanel extends Component
 {
@@ -54,14 +48,6 @@ class SecurityPanel extends Component
 
     public bool $enabled = false;
 
-    public bool $aiEnabled = false;
-
-    /**
-     * The data the latest AI review was sent, while it is being viewed.
-     */
-    #[Locked]
-    public ?string $reviewInput = null;
-
     public string $ip = '';
 
     public string $reason = '';
@@ -75,7 +61,6 @@ class SecurityPanel extends Component
         $this->authorize('view', $this->server);
 
         $this->enabled = $this->state->enabled;
-        $this->aiEnabled = $this->state->ai_enabled;
     }
 
     #[Computed]
@@ -97,115 +82,6 @@ class SecurityPanel extends Component
         Flux::toast(variant: 'success', text: $this->enabled
             ? __('Scanning this server\'s logs. The first scan reads the last few minutes of SSH logins and the end of each access log.')
             : __('Stopped scanning this server\'s logs.'));
-    }
-
-    /**
-     * Turn the AI review on or off for the server. Turning it on reviews the server straight away.
-     *
-     * @throws ValidationException
-     */
-    public function updatedAiEnabled(): void
-    {
-        $this->authorize('update', $this->server);
-
-        if ($this->aiEnabled && ! $this->ai->isConfigured()) {
-            $this->aiEnabled = false;
-
-            throw ValidationException::withMessages(['aiEnabled' => __('An administrator needs to set the AI review\'s API URL and model first.')]);
-        }
-
-        $this->state->update(['ai_enabled' => $this->aiEnabled]);
-
-        if ($this->aiEnabled) {
-            ReviewServerSecurity::dispatch($this->state, auth()->user());
-        }
-
-        Flux::toast(variant: 'success', text: $this->aiEnabled
-            ? __('Reviewing this server with AI. The first review shows here in a minute or two.')
-            : __('Stopped reviewing this server with AI. Earlier reviews are kept.'));
-    }
-
-    public function review(): void
-    {
-        $this->authorize('update', $this->server);
-
-        abort_unless($this->state->ai_enabled && $this->ai->isConfigured(), 403);
-
-        ReviewServerSecurity::dispatch($this->state, auth()->user());
-
-        Flux::toast(variant: 'success', text: __('Reviewing this server with AI.'));
-    }
-
-    #[Computed]
-    public function ai(): AiSettings
-    {
-        return app(AiSettings::class);
-    }
-
-    /**
-     * The latest AI review, without the data it was sent, which is only loaded when someone asks to see it.
-     */
-    #[Computed]
-    public function latestReview(): ?AiReview
-    {
-        return AiReview::query()->where('server_id', $this->server->id)->latest()->latest('id')
-            ->first(['id', 'server_id', 'model', 'reported_model', 'summary', 'findings', 'checked', 'missing_sections', 'input_tokens', 'output_tokens', 'requested_by_id', 'created_at']);
-    }
-
-    /**
-     * Show the data the latest review was sent. It includes the server's accounts and sudo rules, so only people who
-     * can manage the server see it.
-     */
-    public function showReviewInput(): void
-    {
-        $this->authorize('update', $this->server);
-
-        $this->reviewInput = $this->latestReview
-            ? (string) AiReview::query()->whereKey($this->latestReview->id)->value('input')
-            : null;
-
-        Flux::modal('security-scanner-review-input')->show();
-    }
-
-    /**
-     * The findings people have ignored on the server, newest first.
-     *
-     * @return Collection<int, IgnoredFinding>
-     */
-    #[Computed]
-    public function ignoredFindings(): Collection
-    {
-        return IgnoredFinding::query()->where('server_id', $this->server->id)->with('ignoredBy')->latest()->latest('id')->get();
-    }
-
-    /**
-     * Ignore one of the latest review's findings. Later reviews still check for it, and it shows under Ignored.
-     */
-    public function ignoreFinding(string $key): void
-    {
-        $this->authorize('update', $this->server);
-
-        $finding = collect($this->latestReview?->sortedFindings() ?? [])->firstWhere('key', $key);
-
-        abort_if($finding === null, 404);
-
-        IgnoredFinding::firstOrCreate(
-            ['server_id' => $this->server->id, 'key' => $key],
-            ['title' => mb_strimwidth($finding['title'], 0, 255, '…'), 'ignored_by_id' => auth()->id()],
-        );
-
-        unset($this->ignoredFindings);
-
-        Flux::toast(variant: 'success', text: __('Ignoring ":title". Reviews still check for it, and it shows under Ignored.', ['title' => $finding['title']]));
-    }
-
-    public function stopIgnoring(int $ignoredId): void
-    {
-        $this->authorize('update', $this->server);
-
-        IgnoredFinding::query()->where('server_id', $this->server->id)->findOrFail($ignoredId)->delete();
-
-        unset($this->ignoredFindings);
     }
 
     public function scan(): void
