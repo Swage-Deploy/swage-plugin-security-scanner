@@ -157,7 +157,9 @@ test('the reviewer is told password guesses that can\'t succeed are noise', func
     expect((new SecurityReviewer)->instructions())
         ->toContain('ssh_password_guesses says whether a failed SSH password guess could ever succeed')
         ->toContain('guessing is noise however much of it there is')
-        ->toContain('above low')
+        ->toContain('don\'t report the guessing, its volume')
+        ->toContain('a large volume of failed SSH attempts is not a finding on its own')
+        ->not->toContain('above low')
         ->toContain('Don\'t suggest lowering fail2ban\'s limits');
 });
 

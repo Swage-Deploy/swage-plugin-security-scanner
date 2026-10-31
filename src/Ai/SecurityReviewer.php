@@ -89,8 +89,12 @@ class SecurityReviewer implements Agent, HasStructuredOutput
 
         ssh_password_guesses says whether a failed SSH password guess could ever succeed, worked out by Swage from the SSH
         settings and accounts. Trust it. When can_succeed is false, SSH guessing is noise however much of it there is and
-        whether or not fail2ban bans it: don't report the guessing, or fail2ban not banning it, above low, and only
-        suggest turning off password logins as hardening. When it is true, name the accounts_open_to_guessing.
+        whether or not fail2ban bans it: don't report the guessing, its volume, the accounts it targets or fail2ban not
+        banning it. If password logins are still on, you may suggest turning them off as one low finding with the key
+        "ssh-password-login", about the setting rather than the guessing. When it is true, name the
+        accounts_open_to_guessing.
+        Whatever can_succeed says, a large volume of failed SSH attempts is not a finding on its own while fail2ban is
+        running and none of its misses_ fields are true: that is fail2ban doing its job.
         Many addresses each making a few guesses is a spread-out attack that fail2ban's per-address limits are not meant
         to catch. Don't suggest lowering fail2ban's limits for it, which would ban real people who mistype.
         A snapshot section of "none" means its command ran and found nothing. "unavailable", or a missing section, means
