@@ -156,6 +156,13 @@ test('the scan script reads the journal after its cursor and each access log fro
         ->and($next)->not->toContain('/etc/passwd');
 });
 
+test('the scan script only reads journal entries sshd and sudo logged themselves, which other users cannot forge', function () {
+    $script = (new ScanScript('@@M'))->render([]);
+
+    expect($script)->toContain("--since='-15 min' _EXE=/usr/sbin/sshd _UID=0 + _EXE=/usr/lib/openssh/sshd-session _UID=0 + _EXE=/usr/bin/sudo 2>/dev/null")
+        ->and($script)->not->toContain('SYSLOG_IDENTIFIER');
+});
+
 test('log lines cannot forge the sections of the scan output', function () {
     $script = new ScanScript('@@SWAGE_SCAN_REAL');
 

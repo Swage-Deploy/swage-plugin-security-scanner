@@ -74,7 +74,7 @@ Each jail keeps its own file, so one jail's ban ending doesn't lift another jail
 
 Swage connects over SSH, as it does for everything else. No agent is installed, and no port is opened.
 
-- **SSH and sudo** are read from the systemd journal, after the cursor where the last scan stopped. The first scan reads the last 15 minutes.
+- **SSH and sudo** are read from the systemd journal, after the cursor where the last scan stopped. The first scan reads the last 15 minutes. Only entries that sshd, running as root, and sudo logged themselves are read, so a site's user cannot forge logins or failures with `logger -t sshd`.
 - **nginx access logs** (`/var/log/nginx/*access.log`, the server's own and every site's) are read from the byte offset where the last scan stopped. When logrotate replaces a log, its inode changes and the new file is read from the top. A log seen for the first time is read back 256 KB. A log that grew by more than 2 MB since the last scan catches up over the next few scans.
 
 Only counts are stored: one row per kind of event, address, log and hour, plus the first 20 distinct usernames or paths involved. Whole log lines never leave the server. Counted events are kept for 14 days. Resolved alerts are kept for 90 days after they're resolved.

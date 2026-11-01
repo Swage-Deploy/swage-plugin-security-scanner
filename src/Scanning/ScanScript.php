@@ -38,6 +38,20 @@ final readonly class ScanScript
      */
     public const string JOURNAL_SINCE = '-15 min';
 
+    /**
+     * The journal entries SSH and sudo log, matched on fields journald records itself from the process that sent them.
+     * Any user can log a line under sshd's name with logger, so the names an entry gives itself prove nothing: sshd's
+     * entries must come from its own binaries running as root, which no other user can run, and sudo's from sudo,
+     * which is setuid and so ignores anything a user preloads into it.
+     *
+     * @var list<string>
+     */
+    public const array JOURNAL_SOURCES = [
+        '_EXE=/usr/sbin/sshd _UID=0',
+        '_EXE=/usr/lib/openssh/sshd-session _UID=0',
+        '_EXE=/usr/bin/sudo',
+    ];
+
     public function __construct(public string $marker) {}
 
     public static function make(): self
@@ -63,6 +77,7 @@ final readonly class ScanScript
         $maxBytes = self::MAX_BYTES_PER_FILE;
         $maxLines = self::MAX_JOURNAL_LINES;
         $probesJail = InstallFail2ban::PROBES_JAIL;
+        $sources = implode(' + ', self::JOURNAL_SOURCES);
 
         return <<<BASH
         set -uo pipefail
@@ -73,7 +88,7 @@ final readonly class ScanScript
         section client "\${client%% *}"
 
         section journal
-        if out=\$(journalctl --no-pager -o short-iso --show-cursor {$journal} SYSLOG_IDENTIFIER=sshd SYSLOG_IDENTIFIER=sshd-session SYSLOG_IDENTIFIER=sudo 2>/dev/null); then
+        if out=\$(journalctl --no-pager -o short-iso --show-cursor {$journal} {$sources} 2>/dev/null); then
             printf '%s\\n' "\$out" | tail -n {$maxLines}
         else
             section journal-failed
