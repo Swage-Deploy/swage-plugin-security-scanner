@@ -2,12 +2,16 @@
 
 namespace Swage\SecurityScanner;
 
+use App\Notifications\ServerAlert;
 use App\Plugins\HasAttention;
 use App\Servers\ServerIntegrations;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
 use Swage\SecurityScanner\Console\ScanCommand;
+use Swage\SecurityScanner\Events\AlertRaised;
+use Swage\SecurityScanner\Listeners\SendAlertNotification;
 use Swage\SecurityScanner\Livewire\SecurityPanel;
 use Swage\SecurityScanner\Models\SecurityAlert;
 use Swage\SecurityScanner\Models\SecurityEvent;
@@ -36,6 +40,11 @@ class SecurityScannerServiceProvider extends ServiceProvider
         Livewire::component('security-scanner.panel', SecurityPanel::class);
 
         $this->app->make(ServerIntegrations::class)->register(SecurityScannerIntegration::class);
+
+        // Swage v1.3.16 added notifications. Older versions show alerts only on the scanner's tab.
+        if (class_exists(ServerAlert::class)) {
+            Event::listen(AlertRaised::class, SendAlertNotification::class);
+        }
 
         if ($this->app->runningInConsole()) {
             $this->commands([ScanCommand::class]);

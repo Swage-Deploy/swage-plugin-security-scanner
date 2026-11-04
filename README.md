@@ -135,6 +135,10 @@ On Swage `v1.3.3` or later, a server with something in its Security scanner pane
 
 The badge is red when any of them is high severity, amber for medium and grey for low. Resolving the alerts clears it.
 
+## Notifications
+
+On Swage `v1.3.16` or later, each new alert is a notification. The server's owner and Managers see it under **Notifications** in the panel, get it by email unless they've turned plugin alerts off in their notification settings, and it posts to the server's webhooks. It links to the Security scanner's tab. Further occurrences on an open alert don't notify again.
+
 ## Configuration
 
 These can be set in Swage's `.env`:
@@ -150,7 +154,7 @@ Scans run on Swage's queue, one at a time per server, and aren't recorded in the
 
 ## Extending
 
-Each new alert dispatches `Swage\SecurityScanner\Events\AlertRaised`, carrying the `SecurityAlert`. Further occurrences on an open alert don't dispatch it again. Listen for it to send notifications, or to pass the alert and its server's recent `SecurityEvent` counts to an analysis step.
+Each new alert dispatches `Swage\SecurityScanner\Events\AlertRaised`, carrying the `SecurityAlert`. Further occurrences on an open alert don't dispatch it again. Listen for it to send your own notifications, or to pass the alert and its server's recent `SecurityEvent` counts to an analysis step.
 
 ## Updating
 
