@@ -177,6 +177,10 @@ The `tests/SecurityScanner*Test.php` files are Pest tests that run inside a Swag
 
 The tests run the plugin's migrations themselves.
 
+## Trademarks
+
+Swage is an independent project and is not affiliated with, endorsed by or sponsored by Cloudflare. These names, and any related logos, are trademarks of their respective owners, who also hold the copyright in their products. They are used here only to describe what Swage works with.
+
 ## License
 
 Copyright (c) 2026 Node Dog Consulting. Released under the [MIT License](LICENSE).
